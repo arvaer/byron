@@ -1,0 +1,19 @@
+#![warn(rust_2018_idioms)]
+#![warn(clippy::all)]
+#![deny(warnings)]
+
+[package]
+name = "byron"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+memtable = { path = "./memtable" }
+
+[workspace]
+members = [
+    "memtable",
+#    "bloomfilter",
+#    "sstable",
+]
+

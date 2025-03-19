@@ -1,0 +1,92 @@
+syntax = "proto3";
+
+package lsm;
+
+import "google/protobuf/empty.proto";
+
+// Put Command
+// DSL: p [INT1] [INT2]
+// Inserts (or updates) a key-value pair.
+message PutRequest {
+  int32 key = 1;
+  int32 value = 2;
+}
+
+message PutResponse {
+  // No output is expected on a put.
+}
+
+// Get Command
+// DSL: g [INT1]
+// Retrieves the value for a given key. If the key is not present, 'found' is false.
+message GetRequest {
+  int32 key = 1;
+}
+
+message GetResponse {
+  bool found = 1;  // true if the key exists in the tree
+  int32 value = 2; // valid only when found is true
+}
+
+// Range Command
+// DSL: r [INT1] [INT2]
+// Returns all key-value pairs with keys in the half-open range [start, end).
+message RangeRequest {
+  int32 start = 1;  // inclusive start key
+  int32 end = 2;    // exclusive end key
+}
+
+message KeyValue {
+  int32 key = 1;
+  int32 value = 2;
+}
+
+message RangeResponse {
+  repeated KeyValue pairs = 1;
+}
+
+// Delete Command
+// DSL: d [INT1]
+// Removes a key-value pair from the tree.
+message DeleteRequest {
+  int32 key = 1;
+}
+
+message DeleteResponse {
+  // No output is expected for delete.
+}
+
+// Load Command
+// DSL: l "path/to/file"
+// Loads a binary file containing key-value pairs into the tree.
+message LoadRequest {
+  string file_path = 1;
+}
+
+message LoadResponse {
+  // Optionally, return the number of pairs loaded.
+  int32 pairs_loaded = 1;
+}
+
+// Print Stats Command
+// DSL: s
+// Returns statistics including the number of logical pairs,
+// counts per tree level, and a dump of entries in the format "key:value:level".
+message StatsResponse {
+  int32 logical_pairs = 1;
+  // A mapping from level name (e.g., "LVL1") to the count of keys at that level.
+  map<string, int32> level_counts = 2;
+  // Each entry is represented as a string in the "key:value:level" format.
+  repeated string dump = 3;
+}
+
+// LSMTreeService defines an RPC service for the DSL commands.
+service byron {
+  rpc Put(PutRequest) returns (PutResponse);
+  rpc Get(GetRequest) returns (GetResponse);
+  rpc Range(RangeRequest) returns (RangeResponse);
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+  rpc Load(LoadRequest) returns (LoadResponse);
+  rpc PrintStats(google.protobuf.Empty) returns (StatsResponse);
+}
+
