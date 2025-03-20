@@ -9,10 +9,11 @@ edition = "2024"
 
 [dependencies]
 memtable = { path = "./memtable" }
+sstable = { path = "./sstable" }
 
 [workspace]
 members = [
-    "memtable",
+    "memtable", "sstable",
 #    "bloomfilter",
 #    "sstable",
 ]
