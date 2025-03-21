@@ -3,6 +3,7 @@ use crate::SSTable;
 
 pub trait SSTableOps{
     fn create(memtable:&MemTable) -> SSTable;
-    fn merge
-
+    fn iter();
+    fn size();
+    fn features();
 }

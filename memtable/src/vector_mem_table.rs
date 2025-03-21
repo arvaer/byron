@@ -29,4 +29,9 @@ impl MemTableOperations for VectorMemTable {
     fn capacity(&self) -> usize {
         self.data.len()
     }
+
+    fn flush(&self) -> Result<(), crate::error::MemTableError> {
+        todo!()
+    }
+
 }
