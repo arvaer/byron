@@ -1,4 +1,5 @@
 use key_value::KeyValue;
+use sstable::SSTable;
 
 use crate::MemTableOperations;
 
@@ -32,7 +33,7 @@ impl MemTableOperations for VectorMemTable {
         self.data.len()
     }
 
-    fn flush(&self) -> Result<(), crate::error::MemTableError> {
+    fn flush(&self) -> Result<SSTable, crate::error::MemTableError> {
         todo!()
     }
 

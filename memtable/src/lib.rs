@@ -3,6 +3,7 @@ pub mod mem_table_builder;
 mod vector_mem_table;
 
 use error::MemTableError;
+use sstable::SSTable;
 use vector_mem_table::VectorMemTable;
 
 
@@ -10,7 +11,7 @@ pub trait MemTableOperations {
     fn put(&mut self, key: String, value: String);
     fn get(&self, key: &str) -> Option<&String>;
     fn capacity(&self) -> usize;
-    fn flush(&self) -> Result<(), MemTableError>;
+    fn flush(&self) -> Result<SSTable, MemTableError>;
 }
 
 pub enum DataStructure {
@@ -45,7 +46,7 @@ impl MemTableOperations for MemTable {
         }
     }
 
-    fn flush(&self) -> Result<(), MemTableError> {
+    fn flush(&self) -> Result<SSTable, MemTableError> {
         match &self.inner {
             DataStructure::Vector(memtable) => memtable.flush(),
             _ => unimplemented!(),

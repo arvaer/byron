@@ -10,6 +10,7 @@ edition = "2024"
 [dependencies]
 memtable = { path = "./memtable" }
 sstable = { path = "./sstable" }
+thiserror = "2.0.12"
 
 [workspace]
 members = [ "key_value",

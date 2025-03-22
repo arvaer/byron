@@ -1,15 +1,24 @@
-use std::{fs::File, path::Path, sync::Arc};
+use std::{fs::File, sync::Arc};
 
 use bloomfilter::Bloom;
+use key_value::FencePointer;
 
 mod error;
 mod operations;
 
-pub struct SSTableFeatures {}
+pub struct SSTableFeatures {
+    bf_fpr: isize,
+    lz: bool,
+}
 #[derive(Debug, Default)]
-pub struct SSTableConfig {}
-#[derive(Debug)]
-pub struct FencePointer{}
+pub struct SSTableConfig {
+    block_size : usize,
+    restart_interval: usize, // need to store restart pointers at the end of sstable, and then
+                             // bsearch the first key in each restart
+
+
+}
+
 
 #[derive(Debug, Default)]
 pub struct SSTable{
@@ -26,5 +35,6 @@ impl SSTable {
     fn get(&self, key: Arc<str>) -> Option<Arc<str>> {
         todo!();
     }
+
 
 }
