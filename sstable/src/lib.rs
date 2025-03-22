@@ -1,8 +1,9 @@
-use std::{fs::File, sync::Arc};
+use std::{collections::HashMap, fs::File, path::PathBuf, sync::Arc};
 
 use bloomfilter::Bloom;
-use key_value::FencePointer;
+use key_value::{key_value_pair::DeltaEncodedKV, KeyValue};
 
+mod builder;
 mod error;
 mod operations;
 
@@ -10,31 +11,45 @@ pub struct SSTableFeatures {
     bf_fpr: isize,
     lz: bool,
 }
-#[derive(Debug, Default)]
-pub struct SSTableConfig {
-    block_size : usize,
-    restart_interval: usize, // need to store restart pointers at the end of sstable, and then
-                             // bsearch the first key in each restart
 
-
-}
-
-
-#[derive(Debug, Default)]
-pub struct SSTable{
-    file_path: String,
+#[derive(Debug)]
+pub struct SSTable {
+    file_path: PathBuf,
     fd: Option<File>,
-    bloom_filter: Option<Bloom<str>>,
-    fence_pointers: Option<Vec<FencePointer>>,
-    config: SSTableConfig,
+    bloom_filter: Bloom<String>,
     entry_count: usize,
-    size_in_kb: usize
+    //    size_in_kb: usize,
+    page_hash_indices: Vec<HashMap<Vec<u8>, usize>>, // One hash index per block
+    fence_pointers: Vec<(Vec<u8>, usize)>,
 }
 
 impl SSTable {
-    fn get(&self, key: Arc<str>) -> Option<Arc<str>> {
-        todo!();
+    pub fn get(&self, key: String) -> Option<Vec<u8>> {
+        if !self.bloom_filter.check(&key) {
+            return None;
+        }
+
+        todo!()
     }
 
+    fn find_block_with_fence_pointers(&self, key: &[u8]) -> Option<usize> {
+        todo!()
+    }
 
+    fn read_block_from_disk(&self, block_idx: usize) -> Option<Vec<u8>> {
+        todo!()
+    }
+
+    fn binary_search_with_restarts(
+        &self,
+        block_data: &[u8],
+        key: &[u8],
+        restart_points: &[usize],
+    ) -> Option<usize> {
+        todo!()
+    }
+
+    fn extract_value_at_position(&self, block_data: &[u8], position: usize) -> Option<Vec<u8>> {
+        todo!()
+    }
 }

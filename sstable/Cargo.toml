@@ -7,3 +7,6 @@ edition = "2024"
 integer-encoding = "4.0.2"
 bloomfilter = "3"
 key_value = {path = "../key_value"}
+thiserror = "2.0.12"
+tempfile = "3.19.1"
+

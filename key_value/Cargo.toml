@@ -3,3 +3,5 @@ name = "key_value"
 version = "0.1.0"
 edition = "2024"
 
+[dependencies]
+integer-encoding = "4.0.2"

@@ -1,6 +1,10 @@
-use crate::KeyValue;
+use std::sync::Arc;
 
-#[derive(Debug, Clone, PartialEq, Default)]
+use crate::KeyValue;
+use integer_encoding::*;
+
+#[derive(Debug, Clone, PartialEq, Default, Eq, Hash)]
+//
 pub struct DeltaEncodedKV {
     shared_bytes: usize,
     unshared_bytes: usize,
@@ -74,5 +78,35 @@ impl DeltaEncodedKV {
                 value,
             })
         }
+    }
+
+    pub fn calculate_size(&self) -> usize {
+        let mut size = 0;
+        size += self.value_bytes.required_space();
+        size += self.unshared_bytes.required_space();
+        size += self.shared_bytes.required_space();
+        size += self.key_delta.len();
+        size += self.value.len();
+
+        size
+    }
+
+    pub fn to_str(&self) -> Arc<[u8]> {
+        let mut buffer = Vec::with_capacity(
+            self.shared_bytes.required_space()
+                + self.unshared_bytes.required_space()
+                + self.value_bytes.required_space()
+                + self.key_delta.len()
+                + self.value.len(),
+        );
+
+        buffer.extend_from_slice(&self.shared_bytes.encode_var_vec());
+        buffer.extend_from_slice(&self.unshared_bytes.encode_var_vec());
+        buffer.extend_from_slice(&self.value_bytes.encode_var_vec());
+        buffer.extend_from_slice(&self.key_delta);
+        buffer.extend_from_slice(&self.value);
+
+        let arc: Arc<[u8]> = Arc::from(buffer.into_boxed_slice());
+        arc
     }
 }
