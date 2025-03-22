@@ -1,15 +1,10 @@
-mod vector_mem_table;
-pub mod mem_table_builder;
 mod error;
+pub mod mem_table_builder;
+mod vector_mem_table;
 
-use vector_mem_table::VectorMemTable;
 use error::MemTableError;
+use vector_mem_table::VectorMemTable;
 
-
-pub struct KeyValue {
-    pub key: String,
-    pub value: String,
-}
 
 pub trait MemTableOperations {
     fn put(&mut self, key: String, value: String);
@@ -18,7 +13,6 @@ pub trait MemTableOperations {
     fn flush(&self) -> Result<(), MemTableError>;
 }
 
-
 pub enum DataStructure {
     Vector(VectorMemTable),
 }
@@ -26,7 +20,6 @@ pub enum DataStructure {
 pub struct MemTable {
     inner: DataStructure,
 }
-
 
 impl MemTableOperations for MemTable {
     fn put(&mut self, key: String, value: String) {

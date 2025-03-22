@@ -1,4 +1,6 @@
-use crate::{KeyValue, MemTableOperations};
+use key_value::KeyValue;
+
+use crate::MemTableOperations;
 
 pub struct VectorMemTable {
     data: Vec<KeyValue>,

@@ -1,5 +1,9 @@
 use memtable::MemTableOperations;
 use memtable::mem_table_builder::MemTableBuilder;
+pub struct KeyValue {
+    pub key: String,
+    pub value: String,
+}
 
 fn main() {
     let mut memtable = MemTableBuilder::default().max_entries(1000).build();

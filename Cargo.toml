@@ -12,9 +12,7 @@ memtable = { path = "./memtable" }
 sstable = { path = "./sstable" }
 
 [workspace]
-members = [
+members = [ "key_value",
     "memtable", "sstable",
-#    "bloomfilter",
-#    "sstable",
 ]
 

@@ -1,11 +1,9 @@
 use std::{fs::File, path::Path, sync::Arc};
 
 use bloomfilter::Bloom;
-use memtable::MemTable;
 
 mod error;
 mod operations;
-mod key_value_pair;
 
 pub struct SSTableFeatures {}
 #[derive(Debug, Default)]

@@ -1,4 +1,4 @@
-use memtable::KeyValue;
+use crate::KeyValue;
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct DeltaEncodedKV {

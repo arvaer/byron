@@ -6,4 +6,4 @@ edition = "2024"
 [dependencies]
 integer-encoding = "4.0.2"
 bloomfilter = "3"
-memtable = { path = "../memtable" }
+key_value = {path = "../key_value"}
