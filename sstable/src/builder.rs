@@ -82,32 +82,23 @@ impl SSTableBuilder {
             self.seal_current_block();
         }
 
-        let is_restart_point = self.current_block.len() % RESTART_INTERVAL == 0;
-        if is_restart_point {
-            // add to page hash index if we have one
-            if let Some(current_hash_index) = self.page_hash_indices.last_mut() {
-                current_hash_index.insert(key.key.clone(), self.current_block.len());
-            } else {
-                self.page_hash_indices.push(HashMap::new());
-                if let Some(current_hash_index) = self.page_hash_indices.last_mut() {
-                    current_hash_index.insert(key.key.clone(), 0);
-                }
-            }
-
-            if self.current_block.is_empty() && !self.blocks.is_empty() {
+        if self.current_block.is_empty() {
+            self.restart_indices.push(vec![0]);
+            self.page_hash_indices.push(HashMap::new());
+            if !self.blocks.is_empty() {
                 self.fence_pointers
                     .push((key.key.into(), self.current_offset));
             }
-
-            if let Some(restart_indices) = self.restart_indices.last_mut() {
-                restart_indices.push(self.current_block.len());
-            } else {
-                self.restart_indices.push(vec![0]);
+        } else if self.current_block.len() % RESTART_INTERVAL == 0 {
+            if let Some(restart_points) = self.restart_indices.last_mut() {
+                restart_points.push(self.current_block_size);
             }
-
+            if let Some(current_hash_index) = self.page_hash_indices.last_mut() {
+                current_hash_index.insert(key.key.clone(), self.current_block_size);
+            }
             self.last_key = None;
         } else {
-            self.last_key = Some(key);
+            self.last_key = Some(key.clone());
         }
 
         self.current_block.push(dkv);
@@ -527,4 +518,3 @@ mod tests {
         Ok(())
     }
 }
-

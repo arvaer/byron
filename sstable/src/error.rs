@@ -8,7 +8,6 @@ pub enum SSTableError {
     #[error("Block decode error: {0}")]
     StringUTF8(#[from] std::string::FromUtf8Error),
 
-
     #[error("Invalid block size: {0}")]
     InvalidBlockSize(usize),
 
@@ -38,4 +37,7 @@ pub enum SSTableError {
 
     #[error("Failed to build SSTable: {0}")]
     NoTableFound(String),
+
+    #[error("The KVP bridges a block boundary. Starting Offset: {0}")]
+    KVPexceedsBlock(usize),
 }

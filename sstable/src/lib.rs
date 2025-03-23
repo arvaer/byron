@@ -60,47 +60,68 @@ impl SSTable {
             let end_pos = std::cmp::min(restart_point + read_size, block_data.len());
             let kvps = &block_data[restart_point..end_pos];
 
-            if let Some(kvp) = self.deserialize_run_get_key(kvps, key.clone()) {
-                return Ok(Arc::new(kvp));
-            }
+            let kvp: Arc<KeyValue> = match self.deserialize_run_get_key(kvps, key.clone()) {
+                Ok(key) => Arc::new(key),
+                Err(_) => {
+                    todo!()
+                }
+            };
+            return Ok(kvp);
         }
 
-        if let Some(kvp) = self.binary_search_with_restarts(block_data, key, &restart_points) {
-            Ok(Arc::new(kvp))
-        } else {
-            Err(SSTableError::KeyNotfound)
-        }
+        let kvp: Arc<KeyValue> =
+            match self.binary_search_with_restarts(block_data, key, &restart_points) {
+                Ok(key) => Arc::new(key),
+                Err(_) => {
+                    todo!()
+                }
+            };
+        Ok(kvp)
     }
 
-    fn deserialize_run_get_key(&self, run: &[u8], needle: String) -> Option<KeyValue> {
+    fn deserialize_run_get_key(
+        &self,
+        run: &[u8],
+        needle: String,
+    ) -> Result<KeyValue, SSTableError> {
         // Return None if run is empty
         if run.is_empty() {
-            return None;
+            return Err(SSTableError::KeyNotfound);
         }
 
         let mut cursor = Cursor::new(run);
         let mut previous_key: Option<KeyValue> = None;
 
         while (cursor.position() as usize) < run.len() {
+            let remaining_size = run.len() - cursor.position() as usize;
+            if remaining_size <= 1 {
+                return Err(SSTableError::KVPexceedsBlock(cursor.position() as usize));
+            }
+
             let shared_bytes = match cursor.read_varint() {
                 Ok(val) => val,
                 Err(_) => break,
             };
-
             let unshared_bytes = match cursor.read_varint() {
                 Ok(val) => val,
                 Err(_) => break,
             };
+            if remaining_size <= unshared_bytes {
+                return Err(SSTableError::KVPexceedsBlock(cursor.position() as usize));
+            }
 
             let value_bytes = match cursor.read_varint() {
                 Ok(val) => val,
                 Err(_) => break,
             };
+            if remaining_size <= value_bytes {
+                return Err(SSTableError::KVPexceedsBlock(cursor.position() as usize));
+            }
 
             if unshared_bytes > run.len() - cursor.position() as usize
                 || value_bytes > run.len() - cursor.position() as usize - unshared_bytes
             {
-                break;
+                return Err(SSTableError::KVPexceedsBlock(cursor.position() as usize));
             }
 
             let mut key_delta = vec![0u8; unshared_bytes];
@@ -121,19 +142,18 @@ impl SSTable {
                 value: value.into_boxed_slice(),
             };
 
-            // Safely reverse
             let as_key = match dkv.reverse(previous_key) {
                 Some(kv) => kv,
                 None => break,
             };
 
             if as_key.key == needle {
-                return Some(as_key);
+                return Ok(as_key);
             }
             previous_key = Some(as_key);
         }
 
-        None
+        return Err(SSTableError::KeyNotfound);
     }
 
     fn deserialize_first_key_from_run(&self, run: &[u8]) -> Option<KeyValue> {
@@ -147,6 +167,10 @@ impl SSTable {
             Ok(val) => val,
             Err(_) => return None,
         };
+
+        if shared_bytes != 0 {
+            println!("WARNING: First key shared byte is not 0. You are probably mangling keys!");
+        }
 
         let unshared_bytes = match cursor.read_varint() {
             Ok(val) => val,
@@ -187,8 +211,6 @@ impl SSTable {
         dkv.reverse(None)
     }
 
-    // this is not working correctly for case sensetivity. need to fix this in the mean time using
-    // linear search because it works
     fn find_block_with_fence_pointers(&self, key: String) -> Option<(usize, usize)> {
         // say we get a key with first letter b, and fp 1 is a, fp 2 is B
         // in that case we want to return 1
@@ -251,7 +273,7 @@ impl SSTable {
 
         println!("DEBUG: Reading block with index: {:?}", block_idx);
 
-        // Read the file header to determine the start of the data section
+        // we have a magic SSTB at the start
         reader.seek(SeekFrom::Start(0))?;
         let mut magic = [0u8; 4];
         reader.read_exact(&mut magic)?;
@@ -263,7 +285,6 @@ impl SSTable {
             )));
         }
 
-        // If there are no fence pointers, we need to read the entire data section
         if self.fence_pointers.is_empty() {
             let file_size = std::fs::metadata(&self.file_path)?.len();
             let data_section_size = file_size - 8; // subtract header and footer magic
@@ -327,22 +348,25 @@ impl SSTable {
         block_data: Arc<[u8]>,
         key: String,
         restart_points: &[usize],
-    ) -> Option<KeyValue> {
+    ) -> Result<KeyValue, SSTableError> {
         println!("DEBUG: Binary searching for key: '{}'", key);
         println!("DEBUG: Block data size: {} bytes", block_data.len());
         println!("DEBUG: Restart points: {:?}", restart_points);
         // Try linear scan first for debugging
         println!("DEBUG: defaulting to linear scan for now");
-        if let Some(kv) = self.deserialize_run_get_key(&block_data, key.clone()) {
-            return Some(kv);
-        } else {
-            println!("DEBUG: Linear scan did not find key");
+
+        let kv = self.deserialize_run_get_key(&block_data, key.clone());
+        match kv {
+            Ok(kv) => return Ok(kv),
+            Err(SSTableError::KVPexceedsBlock(e)) => return Err(SSTableError::KVPexceedsBlock(e)),
+            _ => {}
         }
+
         println!("DEBUG: Binary search complete, key not found");
         // Handle empty restart points
         if restart_points.is_empty() {
             println!("DEBUG: No restart points available");
-            return None;
+            return Err(SSTableError::KeyNotfound);
         }
 
         let mut left = 0;
@@ -386,12 +410,10 @@ impl SSTable {
                 );
             }
 
-            if let Some(found_key) = self.deserialize_run_get_key(run, key.clone()) {
-                println!("DEBUG: Found key in run at restart point {}", mid);
-                return Some(found_key);
-            } else {
-                println!("DEBUG: Key not found in this run");
-            }
+            match self.deserialize_run_get_key(run, key.clone()) {
+                Ok(key) => return Ok(key),
+                _ => {}
+            };
 
             if let Some(keyvalue) = self.deserialize_first_key_from_run(run) {
                 println!("DEBUG: First key in run: '{}'", keyvalue.key);
@@ -407,7 +429,7 @@ impl SSTable {
                 left = mid + 1;
             }
         }
-        None
+        Err(SSTableError::KeyNotfound)
     }
 }
 
@@ -604,7 +626,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn test_get_existing_key() -> Result<(), SSTableError> {
         println!("========= STARTING TEST_GET_EXISTING_KEY =========");
@@ -758,7 +779,7 @@ mod tests {
                             println!("Failed to deserialize first key from block");
                         }
 
-                        if let Some(found_key) = sstable.binary_search_with_restarts(
+                        if let Ok(found_key) = sstable.binary_search_with_restarts(
                             Arc::clone(&block_data),
                             test_key.to_string(),
                             restart_points,
@@ -1055,7 +1076,6 @@ mod tests {
 
         Ok(())
     }
-
 
     #[test]
     fn test_high_cardinality_prefixes() -> Result<(), SSTableError> {
