@@ -15,22 +15,22 @@ const RESTART_INTERVAL: usize = 16;
 
 #[derive(Debug, Default)]
 pub struct SSTableFeatures {
-    lz: bool,
-    fpr: f64,
+    pub lz: bool,
+    pub fpr: f64,
 }
 
 pub struct SSTableBuilder {
-    features: SSTableFeatures,
-    fence_pointers: Vec<(Arc<str>, usize)>,
-    last_key: Option<KeyValue>,
-    file_name: PathBuf,
-    blocks: Vec<Vec<DeltaEncodedKV>>,   // Store entries in blocks
-    current_block: Vec<DeltaEncodedKV>, // Current block being built
-    current_block_size: usize,          // Current block size in bytes
-    page_hash_indices: Vec<HashMap<String, usize>>, // One hash index per block
-    current_offset: usize,              // File offset
-    restart_indices: Vec<Vec<usize>>,   // Restart indices for each block
-    bloom_filter: Bloom<String>,
+    pub features: SSTableFeatures,
+    pub fence_pointers: Vec<(Arc<str>, usize)>,
+    pub last_key: Option<KeyValue>,
+    pub file_name: PathBuf,
+    pub blocks: Vec<Vec<DeltaEncodedKV>>, // Store entries in blocks
+    pub current_block: Vec<DeltaEncodedKV>, // Current block being built
+    pub current_block_size: usize,        // Current block size in bytes
+    pub page_hash_indices: Vec<HashMap<String, usize>>, // One hash index per block
+    pub current_offset: usize,            // File offset
+    pub restart_indices: Vec<Vec<usize>>, // Restart indices for each block
+    pub bloom_filter: Bloom<String>,
 }
 
 impl SSTableBuilder {
@@ -187,10 +187,9 @@ impl SSTableBuilder {
             file_path: self.file_name.clone(),
             fd: None,
             bloom_filter: self.bloom_filter.clone(),
-            entry_count: self.entry_count(),
             page_hash_indices: self.page_hash_indices.clone(),
             fence_pointers: self.fence_pointers.clone(),
-            restart_indices: self.restart_indices.clone()
+            restart_indices: self.restart_indices.clone(),
         }))
     }
 
@@ -463,8 +462,6 @@ mod tests {
 
         assert!(file_path.exists());
 
-        assert_eq!(sstable.entry_count, 100);
-
         let contents = fs::read(&file_path)?;
         assert!(contents.starts_with(b"SSTB"));
         assert!(contents.ends_with(b"SSTB"));
@@ -530,3 +527,4 @@ mod tests {
         Ok(())
     }
 }
+

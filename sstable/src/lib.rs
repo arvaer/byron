@@ -15,18 +15,11 @@ mod builder;
 mod error;
 mod operations;
 
-pub struct SSTableFeatures {
-    bf_fpr: isize,
-    lz: bool,
-}
-
 #[derive(Debug)]
 pub struct SSTable {
     file_path: PathBuf,
     fd: Option<File>,
     bloom_filter: Bloom<String>,
-    entry_count: usize,
-    //    size_in_kb: usize,
     page_hash_indices: Vec<HashMap<String, usize>>, // One hash index per block
     fence_pointers: Vec<(Arc<str>, usize)>,
     restart_indices: Vec<Vec<usize>>, // Restart indices for each block
@@ -41,17 +34,32 @@ impl SSTable {
         let block_idx = self
             .find_block_with_fence_pointers(key.clone())
             .unwrap_or((0, 1));
+
         let block_data = self.read_block_from_disk(block_idx)?;
-        let kvps: &[u8];
+
+        if block_idx.0 >= self.restart_indices.len() || block_idx.0 >= self.page_hash_indices.len()
+        {
+            return Err(SSTableError::KeyNotfound);
+        }
+
         let restart_points = self.restart_indices[block_idx.0].clone();
 
         if let Some(position) = self.page_hash_indices[block_idx.0].get(&key) {
-            // we have a match in the page hash index
-            let restart_point = restart_points[*position];
-            let read_size = 4096 / 16; // this is 4kb / 16 which is a magic number for our
-                                       // restart count. %%TODO stop being lazyjjjjjjjjjjjjjj
+            // Add bounds checking
+            if *position >= restart_points.len() {
+                return Err(SSTableError::KeyNotfound);
+            }
 
-            kvps = &block_data[restart_point..restart_point + read_size];
+            let restart_point = restart_points[*position];
+            let read_size = 4096 / 16;
+
+            if restart_point >= block_data.len() {
+                return Err(SSTableError::KeyNotfound);
+            }
+
+            let end_pos = std::cmp::min(restart_point + read_size, block_data.len());
+            let kvps = &block_data[restart_point..end_pos];
+
             if let Some(kvp) = self.deserialize_run_get_key(kvps, key.clone()) {
                 return Ok(Arc::new(kvp));
             }
@@ -59,27 +67,51 @@ impl SSTable {
 
         if let Some(kvp) = self.binary_search_with_restarts(block_data, key, &restart_points) {
             Ok(Arc::new(kvp))
-        } else{
+        } else {
             Err(SSTableError::KeyNotfound)
         }
     }
 
     fn deserialize_run_get_key(&self, run: &[u8], needle: String) -> Option<KeyValue> {
+        // Return None if run is empty
+        if run.is_empty() {
+            return None;
+        }
+
         let mut cursor = Cursor::new(run);
         let mut previous_key: Option<KeyValue> = None;
 
         while (cursor.position() as usize) < run.len() {
-            let shared_bytes = cursor.read_varint().unwrap();
+            let shared_bytes = match cursor.read_varint() {
+                Ok(val) => val,
+                Err(_) => break,
+            };
 
-            let unshared_bytes = cursor.read_varint().unwrap();
+            let unshared_bytes = match cursor.read_varint() {
+                Ok(val) => val,
+                Err(_) => break,
+            };
 
-            let value_bytes = cursor.read_varint().unwrap();
+            let value_bytes = match cursor.read_varint() {
+                Ok(val) => val,
+                Err(_) => break,
+            };
+
+            if unshared_bytes > run.len() - cursor.position() as usize
+                || value_bytes > run.len() - cursor.position() as usize - unshared_bytes
+            {
+                break;
+            }
 
             let mut key_delta = vec![0u8; unshared_bytes];
-            cursor.read_exact(&mut key_delta).unwrap();
+            if cursor.read_exact(&mut key_delta).is_err() {
+                break;
+            }
 
             let mut value = vec![0u8; value_bytes];
-            cursor.read_exact(&mut value).unwrap();
+            if cursor.read_exact(&mut value).is_err() {
+                break;
+            }
 
             let dkv = DeltaEncodedKV {
                 shared_bytes,
@@ -89,7 +121,12 @@ impl SSTable {
                 value: value.into_boxed_slice(),
             };
 
-            let as_key = dkv.reverse(previous_key).unwrap(); // %TODO add better handling of errors
+            // Safely reverse
+            let as_key = match dkv.reverse(previous_key) {
+                Some(kv) => kv,
+                None => break,
+            };
+
             if as_key.key == needle {
                 return Some(as_key);
             }
@@ -100,17 +137,44 @@ impl SSTable {
     }
 
     fn deserialize_first_key_from_run(&self, run: &[u8]) -> Option<KeyValue> {
+        if run.is_empty() {
+            return None;
+        }
+
         let mut cursor = Cursor::new(run);
 
-        let shared_bytes = cursor.read_varint().unwrap();
-        let unshared_bytes = cursor.read_varint().unwrap();
-        let value_bytes = cursor.read_varint().unwrap();
+        let shared_bytes = match cursor.read_varint() {
+            Ok(val) => val,
+            Err(_) => return None,
+        };
+
+        let unshared_bytes = match cursor.read_varint() {
+            Ok(val) => val,
+            Err(_) => return None,
+        };
+
+        let value_bytes = match cursor.read_varint() {
+            Ok(val) => val,
+            Err(_) => return None,
+        };
+
+        println!(
+            "DEBUG: First key metadata: shared_bytes={}, unshared_bytes={}, value_bytes={}",
+            shared_bytes, unshared_bytes, value_bytes
+        );
+        if unshared_bytes > run.len() || value_bytes > run.len() {
+            return None;
+        }
 
         let mut key_delta = vec![0u8; unshared_bytes];
-        cursor.read_exact(&mut key_delta).unwrap();
+        if cursor.read_exact(&mut key_delta).is_err() {
+            return None;
+        }
 
         let mut value = vec![0u8; value_bytes];
-        cursor.read_exact(&mut value).unwrap();
+        if cursor.read_exact(&mut value).is_err() {
+            return None;
+        }
 
         let dkv = DeltaEncodedKV {
             shared_bytes,
@@ -120,7 +184,7 @@ impl SSTable {
             value: value.into_boxed_slice(),
         };
 
-        Some(dkv.reverse(None).unwrap())
+        dkv.reverse(None)
     }
 
     // this is not working correctly for case sensetivity. need to fix this in the mean time using
@@ -175,7 +239,7 @@ impl SSTable {
         Some((left - 1, left))
     }
 
-    fn read_block_from_disk(&self, offset: (usize, usize)) -> Result<Arc<[u8]>, SSTableError> {
+    fn read_block_from_disk(&self, block_idx: (usize, usize)) -> Result<Arc<[u8]>, SSTableError> {
         let mut reader: BufReader<&File>;
         let file: File;
         if let Some(file) = &self.fd {
@@ -185,13 +249,76 @@ impl SSTable {
             reader = BufReader::new(&file);
         }
 
-        let ffw = b"SSTB".len() + offset.0;
+        println!("DEBUG: Reading block with index: {:?}", block_idx);
 
-        reader
-            .seek(SeekFrom::Start(ffw as u64))
-            .map_err(SSTableError::FileSystemError)?;
-        let mut block_data = vec![0u8, offset.1 as u8 - offset.0 as u8];
-        let _ = reader.read_exact(&mut block_data);
+        // Read the file header to determine the start of the data section
+        reader.seek(SeekFrom::Start(0))?;
+        let mut magic = [0u8; 4];
+        reader.read_exact(&mut magic)?;
+
+        if &magic != b"SSTB" {
+            return Err(SSTableError::FileSystemError(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Invalid file magic",
+            )));
+        }
+
+        // If there are no fence pointers, we need to read the entire data section
+        if self.fence_pointers.is_empty() {
+            let file_size = std::fs::metadata(&self.file_path)?.len();
+            let data_section_size = file_size - 8; // subtract header and footer magic
+            let data_size = data_section_size - 4; // subtracting header
+
+            reader.seek(SeekFrom::Start(4))?;
+
+            let mut block_data = vec![0u8; data_size as usize];
+            reader.read_exact(&mut block_data)?;
+
+            println!("DEBUG: Read {} bytes of data", block_data.len());
+            if !block_data.is_empty() {
+                let display_size = std::cmp::min(block_data.len(), 50);
+                println!(
+                    "DEBUG: First {} bytes: {:?}",
+                    display_size,
+                    &block_data[..display_size]
+                );
+            }
+
+            return Ok(Arc::from(block_data.into_boxed_slice()));
+        }
+
+        let start_offset = if block_idx.0 < self.fence_pointers.len() {
+            self.fence_pointers[block_idx.0].1
+        } else {
+            4 // right after head
+        };
+
+        let end_offset = if block_idx.1 < self.fence_pointers.len() {
+            self.fence_pointers[block_idx.1].1
+        } else {
+            std::fs::metadata(&self.file_path)?.len() as usize - 4 // Before the Footer
+        };
+
+        let block_size = end_offset - start_offset;
+        println!(
+            "DEBUG: Reading from offset {} to {}, size {}",
+            start_offset, end_offset, block_size
+        );
+
+        reader.seek(SeekFrom::Start(start_offset as u64))?;
+        let mut block_data = vec![0u8; block_size];
+        reader.read_exact(&mut block_data)?;
+
+        println!("DEBUG: Successfully read {} bytes", block_data.len());
+        if !block_data.is_empty() {
+            let display_size = std::cmp::min(block_data.len(), 50);
+            println!(
+                "DEBUG: First {} bytes: {:?}",
+                display_size,
+                &block_data[..display_size]
+            );
+        }
+
         Ok(Arc::from(block_data.into_boxed_slice()))
     }
 
@@ -199,33 +326,87 @@ impl SSTable {
         &self,
         block_data: Arc<[u8]>,
         key: String,
-        restart_points: &Vec<usize>,
+        restart_points: &[usize],
     ) -> Option<KeyValue> {
-        // so first thing we do is get the midpoint.
-        // we basically replicate the logic above but for retart points. however, we need to decode
-        // the block.
+        println!("DEBUG: Binary searching for key: '{}'", key);
+        println!("DEBUG: Block data size: {} bytes", block_data.len());
+        println!("DEBUG: Restart points: {:?}", restart_points);
+        // Try linear scan first for debugging
+        println!("DEBUG: defaulting to linear scan for now");
+        if let Some(kv) = self.deserialize_run_get_key(&block_data, key.clone()) {
+            return Some(kv);
+        } else {
+            println!("DEBUG: Linear scan did not find key");
+        }
+        println!("DEBUG: Binary search complete, key not found");
+        // Handle empty restart points
+        if restart_points.is_empty() {
+            println!("DEBUG: No restart points available");
+            return None;
+        }
 
         let mut left = 0;
-        let mut right = 16;
-        let run_size = 4096 / 16;
+        let mut right = restart_points.len();
+
+        let max_block_size = block_data.len();
+        let run_size = 4096 / 16; // Keep your constant if it's intentional
+
+        println!("DEBUG: Using run size: {}", run_size);
 
         while left < right {
             let mid = left + (right - left) / 2;
-            let run =
-                &block_data[run_size * restart_points[mid]..run_size * restart_points[mid] + 1];
+            println!(
+                "DEBUG: Checking restart point {} ({} to {})",
+                mid, left, right
+            );
+
+            if mid >= restart_points.len() {
+                println!("DEBUG: Mid index out of bounds");
+                break;
+            }
+
+            let restart_pos = restart_points[mid];
+            println!("DEBUG: Restart position: {}", restart_pos);
+
+            let start_pos = std::cmp::min(restart_pos, max_block_size.saturating_sub(1));
+            let end_pos = std::cmp::min(start_pos + run_size, max_block_size);
+            println!("DEBUG: Checking range {} to {}", start_pos, end_pos);
+
+            if start_pos >= end_pos {
+                println!("DEBUG: Invalid range (start >= end)");
+                break;
+            }
+
+            let run = &block_data[start_pos..end_pos];
+            println!("DEBUG: Run size: {} bytes", run.len());
+            if !run.is_empty() {
+                println!(
+                    "DEBUG: First few bytes: {:?}",
+                    &run[..std::cmp::min(10, run.len())]
+                );
+            }
+
             if let Some(found_key) = self.deserialize_run_get_key(run, key.clone()) {
+                println!("DEBUG: Found key in run at restart point {}", mid);
                 return Some(found_key);
+            } else {
+                println!("DEBUG: Key not found in this run");
             }
 
             if let Some(keyvalue) = self.deserialize_first_key_from_run(run) {
+                println!("DEBUG: First key in run: '{}'", keyvalue.key);
                 if keyvalue.key > key {
+                    println!("DEBUG: First key > target key, moving left");
                     right = mid;
                 } else {
+                    println!("DEBUG: First key <= target key, moving right");
                     left = mid + 1;
                 }
+            } else {
+                println!("DEBUG: Failed to deserialize first key from run");
+                left = mid + 1;
             }
         }
-
         None
     }
 }
@@ -234,8 +415,8 @@ impl SSTable {
 mod tests {
     use super::*;
     use bloomfilter::Bloom;
-    use std::path::PathBuf;
     use std::sync::Arc;
+    use std::{fs, path::PathBuf};
 
     // Helper constructor for testing purposes
     impl SSTable {
@@ -247,7 +428,6 @@ mod tests {
                 file_path: PathBuf::from("test.sst"),
                 fd: None,
                 bloom_filter: bloom,
-                entry_count: fence_pointers.len(),
                 page_hash_indices: Vec::new(),
                 fence_pointers,
                 restart_indices: Vec::new(),
@@ -411,5 +591,538 @@ mod tests {
         // Should still work properly with just 2 pointers
         let result = sstable.find_block_with_fence_pointers("m".to_string());
         assert_eq!(result, Some((0, 1)));
+    }
+
+    use builder::{SSTableBuilder, SSTableFeatures};
+    use key_value::KeyValue;
+    use tempfile::tempdir;
+
+    fn create_test_kv(key: &str, value: &str) -> KeyValue {
+        KeyValue {
+            key: key.to_string(),
+            value: value.to_string(),
+        }
+    }
+
+
+    #[test]
+    fn test_get_existing_key() -> Result<(), SSTableError> {
+        println!("========= STARTING TEST_GET_EXISTING_KEY =========");
+        // Create a temporary directory
+        let temp_dir = tempdir().unwrap();
+        let file_path = temp_dir.path().join("test_get_key.sst");
+
+        println!("Using file path: {:?}", file_path);
+
+        let features = SSTableFeatures {
+            lz: false,
+            fpr: 0.01,
+        };
+
+        println!("Creating SSTableBuilder...");
+        let mut builder = SSTableBuilder::new(features, &file_path, 100)?;
+
+        let test_key = "test-key-42";
+        let test_value = "test-value-42";
+
+        println!("Adding test key: {} with value: {}", test_key, test_value);
+        builder.add_from_kv(create_test_kv(test_key, test_value))?;
+
+        println!("Adding other keys...");
+        for i in 0..5 {
+            let key = format!("other-key-{}", i);
+            let value = format!("other-value-{}", i);
+            println!("  Adding: {} = {}", key, value);
+            builder.add_from_kv(create_test_kv(&key, &value))?;
+        }
+
+        println!("Building SSTable...");
+        let sstable = builder.build()?;
+
+        println!("SSTable built. Stats:");
+        println!("  Fence pointers count: {}", sstable.fence_pointers.len());
+        println!("  Restart indices count: {}", sstable.restart_indices.len());
+        println!(
+            "  Page hash indices count: {}",
+            sstable.page_hash_indices.len()
+        );
+
+        if !sstable.fence_pointers.is_empty() {
+            println!("Fence pointers:");
+            for (i, (key, offset)) in sstable.fence_pointers.iter().enumerate() {
+                println!("  [{}] Key: '{}', Offset: {}", i, key, offset);
+            }
+        }
+
+        if !sstable.restart_indices.is_empty() {
+            println!("Restart indices (first block):");
+            for (i, pos) in sstable.restart_indices[0].iter().enumerate() {
+                println!("  [{}] Position: {}", i, pos);
+            }
+        }
+
+        if !sstable.page_hash_indices.is_empty() {
+            println!("Page hash indices (first block):");
+            for (key, pos) in sstable.page_hash_indices[0].iter() {
+                println!("  Key: '{}', Position: {}", key, pos);
+            }
+        }
+
+        // Verify the file exists
+        println!("Checking if file exists: {}", file_path.exists());
+        assert!(file_path.exists(), "SSTable file was not created");
+
+        let file_size = std::fs::metadata(&file_path)?.len();
+        println!("File size: {} bytes", file_size);
+
+        // Check if our test key is in the bloom filter
+        println!("Checking if key '{}' is in bloom filter...", test_key);
+        let bloom_result = sstable.bloom_filter.check(&test_key.to_string());
+        println!("Bloom filter result: {}", bloom_result);
+
+        // Try to find the block for our key
+        println!("Finding block with fence pointers...");
+        let block_idx = sstable
+            .find_block_with_fence_pointers(test_key.to_string())
+            .unwrap_or((0, 1));
+        println!("Block index: {:?}", block_idx);
+
+        // Read the block
+        println!("Reading block from disk...");
+        let block_data_result = sstable.read_block_from_disk(block_idx);
+        match &block_data_result {
+            Ok(data) => println!("Block data size: {} bytes", data.len()),
+            Err(e) => println!("Error reading block: {:?}", e),
+        }
+
+        let block_data = block_data_result?;
+
+        // Check the restart indices for this block
+        println!("Checking restart indices for block {}...", block_idx.0);
+        if block_idx.0 < sstable.restart_indices.len() {
+            let restart_points = &sstable.restart_indices[block_idx.0];
+            println!("Restart points count: {}", restart_points.len());
+            for (i, pos) in restart_points.iter().enumerate() {
+                println!("  [{}] Position: {}", i, pos);
+            }
+        } else {
+            println!("Block index out of bounds for restart_indices");
+        }
+
+        // Check page hash indices
+        println!("Checking page hash indices for block {}...", block_idx.0);
+        if block_idx.0 < sstable.page_hash_indices.len() {
+            let page_hash = &sstable.page_hash_indices[block_idx.0];
+            println!("Page hash count: {}", page_hash.len());
+            println!(
+                "Does page hash contain our key? {}",
+                page_hash.contains_key(test_key)
+            );
+
+            if let Some(pos) = page_hash.get(test_key) {
+                println!("Position in page hash: {}", pos);
+            }
+        } else {
+            println!("Block index out of bounds for page_hash_indices");
+        }
+
+        // Now try to get the key
+        println!("Attempting to get key: '{}'...", test_key);
+        match sstable.get(test_key.to_string()) {
+            Ok(kv) => {
+                println!("SUCCESS! Key found!");
+                println!("Retrieved value: '{}'", kv.value);
+                assert_eq!(kv.value, test_value);
+                Ok(())
+            }
+            Err(e) => {
+                println!("FAILED to retrieve key: {:?}", e);
+                // For debugging, let's try to manually deserialize the block
+                println!("\nAttempting manual deserialization of block data...");
+                if !block_data.is_empty() {
+                    println!(
+                        "First few bytes: {:?}",
+                        &block_data[..std::cmp::min(20, block_data.len())]
+                    );
+
+                    // Try to manually deserialize
+                    if let Some(restart_points) =
+                        block_idx.0.checked_sub(sstable.restart_indices.len())
+                    {
+                        let restart_points = &sstable.restart_indices[restart_points];
+
+                        if let Some(first_key) = sstable.deserialize_first_key_from_run(&block_data)
+                        {
+                            println!("First key in block: '{}'", first_key.key);
+                        } else {
+                            println!("Failed to deserialize first key from block");
+                        }
+
+                        if let Some(found_key) = sstable.binary_search_with_restarts(
+                            Arc::clone(&block_data),
+                            test_key.to_string(),
+                            restart_points,
+                        ) {
+                            println!(
+                                "Manual binary search found key: '{}' with value: '{}'",
+                                found_key.key, found_key.value
+                            );
+                        } else {
+                            println!("Manual binary search did not find key");
+                        }
+                    }
+                }
+
+                Err(e)
+            }
+        }
+    }
+    #[test]
+    fn test_get_nonexistent_key() -> Result<(), SSTableError> {
+        let temp_dir = tempdir().unwrap();
+        let file_path = temp_dir.path().join("test.sst");
+
+        let features = SSTableFeatures {
+            lz: false,
+            fpr: 0.01,
+        };
+
+        let mut builder = SSTableBuilder::new(features, &file_path, 100)?;
+
+        for i in 0..100 {
+            let key = format!("key-{:05}", i);
+            builder.add_from_kv(create_test_kv(&key, &format!("value-{}", i)))?;
+        }
+
+        let sstable = builder.build()?;
+
+        // Test getting a nonexistent key
+        let key = "nonexistent-key".to_string();
+        let result = sstable.get(key);
+        assert!(matches!(result, Err(SSTableError::KeyNotfound)));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_binary_search_with_restarts() -> Result<(), SSTableError> {
+        let temp_dir = tempdir().unwrap();
+        let file_path = temp_dir.path().join("test.sst");
+
+        let features = SSTableFeatures {
+            lz: false,
+            fpr: 0.01,
+        };
+
+        let mut builder = SSTableBuilder::new(features, &file_path, 1000)?;
+
+        for i in 0..200 {
+            let key = format!("key-{:05}", i);
+            builder.add_from_kv(create_test_kv(&key, &format!("value-{}", i)))?;
+        }
+
+        let sstable = builder.build()?;
+
+        let test_keys = [
+            "key-00000", // First key
+            "key-00050", // Middle key
+            "key-00199", // Last key
+            "key-00075", // Random key
+        ];
+
+        for &key in &test_keys {
+            let result = sstable.get(key.to_string())?;
+            let expected_value = format!(
+                "value-{}",
+                key.split('-').nth(1).unwrap().parse::<i32>().unwrap()
+            );
+            assert_eq!(result.value, expected_value);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_page_hash_index() -> Result<(), SSTableError> {
+        let temp_dir = tempdir().unwrap();
+        let file_path = temp_dir.path().join("test.sst");
+
+        let features = SSTableFeatures {
+            lz: false,
+            fpr: 0.01,
+        };
+
+        let mut builder = SSTableBuilder::new(features, &file_path, 1000)?;
+
+        for i in 0..500 {
+            let key = format!("key-{:05}", i);
+            let value = "x".repeat(100); // Large values to force multiple blocks
+            builder.add_from_kv(create_test_kv(&key, &value))?;
+        }
+
+        let sstable = builder.build()?;
+
+        assert!(!sstable.page_hash_indices.is_empty());
+
+        // Check that keys can be found in each block
+        for i in (0..500).step_by(50) {
+            let key = format!("key-{:05}", i);
+            let result = sstable.get(key.to_string()).unwrap();
+
+            assert!(result.key == key);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_multiple_blocks_edge_cases() -> Result<(), SSTableError> {
+        let temp_dir = tempdir().unwrap();
+        let file_path = temp_dir.path().join("test.sst");
+
+        let features = SSTableFeatures {
+            lz: false,
+            fpr: 0.01,
+        };
+
+        let mut builder = SSTableBuilder::new(features, &file_path, 1000)?;
+
+        // add keys that force block boundaries
+        for i in 0..150 {
+            let key = format!("key-{:05}", i);
+            let value = "x".repeat(if i % 50 == 0 { 1000 } else { 10 }); // Force block splits at every 50th key
+            builder.add_from_kv(create_test_kv(&key, &value))?;
+        }
+
+        builder.build()?;
+
+        let sstable = SSTable {
+            file_path: file_path.clone(),
+            fd: None,
+            bloom_filter: builder.bloom_filter.clone(),
+            page_hash_indices: builder.page_hash_indices.clone(),
+            fence_pointers: builder.fence_pointers.clone(),
+            restart_indices: builder.restart_indices.clone(),
+        };
+
+        for i in (0..150).step_by(50) {
+            let key = format!("key-{:05}", i);
+            let result = sstable.get(key);
+            assert!(result.is_ok());
+        }
+        for i in [49, 50, 51, 99, 100, 101] {
+            let key = format!("key-{:05}", i);
+            let result = sstable.get(key);
+            assert!(result.is_ok());
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_block_from_disk() -> Result<(), SSTableError> {
+        let temp_dir = tempdir().unwrap();
+        let file_path = temp_dir.path().join("test.sst");
+
+        let features = SSTableFeatures {
+            lz: false,
+            fpr: 0.01,
+        };
+
+        let mut builder = SSTableBuilder::new(features, &file_path, 100)?;
+        for i in 0..50 {
+            let key = format!("key-{:05}", i);
+            builder.add_from_kv(create_test_kv(&key, &format!("value-{}", i)))?;
+        }
+
+        builder.build()?;
+
+        let sstable = SSTable {
+            file_path: file_path.clone(),
+            fd: None, // Testing with closed file
+            bloom_filter: builder.bloom_filter.clone(),
+            page_hash_indices: builder.page_hash_indices.clone(),
+            fence_pointers: builder.fence_pointers.clone(),
+            restart_indices: builder.restart_indices.clone(),
+        };
+
+        if !sstable.fence_pointers.is_empty() {
+            let block_offset = (0, 1); // First block
+            let block_data = sstable.read_block_from_disk(block_offset)?;
+            assert!(!block_data.is_empty());
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_deserialize_first_key_from_run() -> Result<(), SSTableError> {
+        let temp_dir = tempdir().unwrap();
+        let file_path = temp_dir.path().join("test.sst");
+
+        let features = SSTableFeatures {
+            lz: false,
+            fpr: 0.01,
+        };
+
+        let mut builder = SSTableBuilder::new(features, &file_path, 100)?;
+
+        // Add some keys with a pattern
+        let keys = ["apple", "banana", "cherry", "date", "elderberry"];
+        for key in keys {
+            builder.add_from_kv(create_test_kv(key, "fruit"))?;
+        }
+
+        let sstable = builder.build()?;
+
+        if !sstable.fence_pointers.is_empty() {
+            let block_data = sstable.read_block_from_disk((0, 1))?;
+
+            let run = &block_data[..100]; // Taking first 100 bytes as a sample
+
+            if let Some(key_value) = sstable.deserialize_first_key_from_run(run) {
+                // The first key should be "apple"
+                assert_eq!(key_value.key, "apple");
+            }
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_concurrent_reads() -> Result<(), SSTableError> {
+        let temp_dir = tempdir().unwrap();
+        let file_path = temp_dir.path().join("test.sst");
+
+        let features = SSTableFeatures {
+            lz: false,
+            fpr: 0.01,
+        };
+
+        let mut builder = SSTableBuilder::new(features, &file_path, 1000)?;
+
+        for i in 0..200 {
+            let key = format!("key-{:05}", i);
+            builder.add_from_kv(create_test_kv(&key, &format!("value-{}", i)))?;
+        }
+
+        let sstable = builder.build()?;
+        let sstable_arc = Arc::new(sstable);
+
+        let mut handles = vec![];
+        for t in 0..10 {
+            let sstable_clone = Arc::clone(&sstable_arc);
+            let handle = std::thread::spawn(move || {
+                let start = t * 20;
+                let end = start + 20;
+
+                for i in start..end {
+                    let key = format!("key-{:05}", i);
+                    let result = sstable_clone.get(key);
+                    assert!(result.is_ok());
+                }
+            });
+
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_large_values() -> Result<(), SSTableError> {
+        let temp_dir = tempdir().unwrap();
+        let file_path = temp_dir.path().join("test.sst");
+
+        let features = SSTableFeatures {
+            lz: false,
+            fpr: 0.01,
+        };
+
+        let mut builder = SSTableBuilder::new(features, &file_path, 100)?;
+
+        let large_value = "x".repeat(1_000_000); // 1MB value
+        builder.add_from_kv(create_test_kv("large-key", &large_value))?;
+
+        let sstable = builder.build()?;
+
+        let result = sstable.get("large-key".to_string())?;
+        assert_eq!(result.value.len(), 1_000_000);
+
+        Ok(())
+    }
+
+
+    #[test]
+    fn test_high_cardinality_prefixes() -> Result<(), SSTableError> {
+        let temp_dir = tempdir().unwrap();
+        let file_path = temp_dir.path().join("test.sst");
+
+        let features = SSTableFeatures {
+            lz: false,
+            fpr: 0.01,
+        };
+
+        let mut builder = SSTableBuilder::new(features, &file_path, 1000)?;
+
+        // Add keys with high-cardinality prefixes to test delta encoding
+        for i in 0..100 {
+            // Different prefixes for each key
+            let key = format!("prefix-{:03}:suffix-{:03}", i % 10, i);
+            builder.add_from_kv(create_test_kv(&key, &format!("value-{}", i)))?;
+        }
+
+        let sstable = builder.build()?;
+
+        // Test a sampling of keys
+        for i in [0, 15, 35, 67, 99] {
+            let key = format!("prefix-{:03}:suffix-{:03}", i % 10, i);
+            let result = sstable.get(key)?;
+            assert_eq!(result.value, format!("value-{}", i));
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_sorted_insertion() -> Result<(), SSTableError> {
+        let temp_dir = tempdir().unwrap();
+        let file_path = temp_dir.path().join("test.sst");
+
+        let features = SSTableFeatures {
+            lz: false,
+            fpr: 0.01,
+        };
+
+        let mut builder = SSTableBuilder::new(features, &file_path, 100)?;
+        let mut keys = Vec::new();
+        for i in (0..50).rev() {
+            let key = format!("key-{:05}", i);
+            keys.push(key.clone());
+            builder.add_from_kv(create_test_kv(&key, &format!("value-{}", i)))?;
+        }
+
+        let sstable = builder.build()?;
+        keys.sort();
+
+        if !sstable.fence_pointers.is_empty() {
+            let mut fence_keys = sstable
+                .fence_pointers
+                .iter()
+                .map(|(k, _)| k.to_string())
+                .collect::<Vec<_>>();
+
+            fence_keys.sort();
+
+            for i in 0..fence_keys.len() {
+                assert_eq!(sstable.fence_pointers[i].0.to_string(), fence_keys[i]);
+            }
+        }
+
+        Ok(())
     }
 }
