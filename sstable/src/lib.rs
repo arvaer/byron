@@ -1,4 +1,10 @@
-use std::{collections::HashMap, fs::File, io::{BufReader, Read, Seek, SeekFrom}, path::PathBuf, sync::Arc};
+use std::{
+    collections::HashMap,
+    fs::File,
+    io::{BufReader, Read, Seek, SeekFrom},
+    path::PathBuf,
+    sync::Arc,
+};
 
 use bloomfilter::Bloom;
 use error::SSTableError;
@@ -20,73 +26,32 @@ pub struct SSTable {
     bloom_filter: Bloom<String>,
     entry_count: usize,
     //    size_in_kb: usize,
-    page_hash_indices: Vec<HashMap<Vec<u8>, usize>>, // One hash index per block
+    page_hash_indices: Vec<HashMap<String, usize>>, // One hash index per block
     fence_pointers: Vec<(Arc<str>, usize)>,
 }
 
 impl SSTable {
-    pub fn get(&self, key: String) -> Option<Vec<u8>> {
+    pub fn get(&self, key: String) -> Result<Arc<str>, SSTableError> {
         if !self.bloom_filter.check(&key) {
-            return None;
+            return Err(SSTableError::KeyNotfound);
         }
 
-        let block_idx = self.find_block_with_fence_pointers(key)?;
+        let block_idx = self.find_block_with_fence_pointers(key).unwrap_or((0, 1));
         let block_data = self.read_block_from_disk(block_idx)?;
+        let restart_points = &self.restart_indices[block_idx];
+        let entry_position = self.binary_search_with_restarts(block_data, key, restart_points)?;
+        if let Some(position) = self.page_hash_indices[block_idx.0].get(key.as_bytes()) {
+            return self.extract_value_at_position(block_data, position);
+        }
 
         todo!()
     }
-    /* if let Some(position) = self.page_hash_indices[block_idx].get(key) {
-         return self.extract_value_at_position(block_data, *position);
-     }
 
-     let restart_points = &self.restart_indices[block_idx];
-     let entry_position = self.binary_search_with_restarts(block_data, key, restart_points)?;
+    /*
 
      self.extract_value_at_position(block_data, entry_position)
     */
 
-    fn find_block_with_fence_pointers_linear(&self, key: String) -> Option<usize> {
-        if self.fence_pointers.is_empty() {
-            return None;
-        }
-        if self.fence_pointers.len() == 1 {
-            return Some(0);
-        }
-
-        println!("searching for key: '{}'", key);
-        for (i, fp) in self.fence_pointers.iter().enumerate() {
-            println!("Fence pointer {}: '{}'", i, fp.0.as_ref());
-        }
-        let first_key = self.fence_pointers[0].0.as_ref();
-        if key.as_str() < first_key {
-            return Some(0);
-        }
-        let last_key = self.fence_pointers.last().unwrap().0.as_ref();
-        if key.as_str() >= last_key {
-            return Some(self.fence_pointers.len() - 1);
-        }
-
-        for i in 0..self.fence_pointers.len() - 1 {
-            let current_key = self.fence_pointers[i].0.as_ref();
-            let next_key = self.fence_pointers[i + 1].0.as_ref();
-
-            if current_key == next_key && key.as_str() == current_key {
-                return Some(i);
-            }
-
-            println!(
-                "checking if '{}' is between '{}' and '{}'",
-                key, current_key, next_key
-            );
-
-            if key.as_str() >= current_key && key.as_str() < next_key {
-                return Some(i);
-            }
-        }
-
-        println!("warning: fell through to fallback case!");
-        Some(0)
-    }
     // this is not working correctly for case sensetivity. need to fix this in the mean time using
     // linear search because it works
     fn find_block_with_fence_pointers(&self, key: String) -> Option<(usize, usize)> {
@@ -139,24 +104,24 @@ impl SSTable {
         Some((left - 1, left))
     }
 
-    fn read_block_from_disk(&self, offset: (usize, usize)) -> Result<Arc<str>, SSTableError> {
+    fn read_block_from_disk(&self, offset: (usize, usize)) -> Result<Arc<[u8]>, SSTableError> {
         let mut reader: BufReader<&File>;
         let file: File;
         if let Some(file) = &self.fd {
             reader = BufReader::new(file);
         } else {
-            file = File::open(&self.file_path)
-                .map_err(SSTableError::FileSystemError)?;
+            file = File::open(&self.file_path).map_err(SSTableError::FileSystemError)?;
             reader = BufReader::new(&file);
         }
 
         let ffw = b"SSTB".len() + offset.0;
 
-        reader.seek(SeekFrom::Start(ffw as u64)).map_err(SSTableError::FileSystemError)?;
+        reader
+            .seek(SeekFrom::Start(ffw as u64))
+            .map_err(SSTableError::FileSystemError)?;
         let mut block_data = vec![0u8, offset.1 as u8 - offset.0 as u8];
-        reader.read_exact(&mut block_data);
-        let block_string = String::from_utf8(block_data).map_err(SSTableError::StringUTF8)?;
-        Ok(Arc::from(block_string.into_boxed_str()))
+        let _ = reader.read_exact(&mut block_data);
+        Ok(Arc::from(block_data.into_boxed_slice()))
     }
 
     fn binary_search_with_restarts(
@@ -168,8 +133,8 @@ impl SSTable {
         todo!()
     }
 
-    fn extract_value_at_position(&self, block_data: &[u8], position: usize) -> Option<Vec<u8>> {
-        todo!()
+    fn extract_value_at_position(&self, block_data: Arc<[u8]>, position: usize) -> Option<Arc<u8>> {
+        Some(block_data[position..])
     }
 }
 

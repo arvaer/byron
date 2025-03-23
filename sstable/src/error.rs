@@ -23,6 +23,9 @@ pub enum SSTableError {
     #[error("Empty key not allowed")]
     EmptyKey,
 
+    #[error("Key Not Found")]
+    KeyNotfound,
+
     #[error("Failed to encode key-value pair")]
     EncodingError,
 

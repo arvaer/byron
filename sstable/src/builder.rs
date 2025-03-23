@@ -27,7 +27,7 @@ pub struct SSTableBuilder {
     blocks: Vec<Vec<DeltaEncodedKV>>,   // Store entries in blocks
     current_block: Vec<DeltaEncodedKV>, // Current block being built
     current_block_size: usize,          // Current block size in bytes
-    page_hash_indices: Vec<HashMap<Vec<u8>, usize>>, // One hash index per block
+    page_hash_indices: Vec<HashMap<String, usize>>, // One hash index per block
     current_offset: usize,              // File offset
     restart_indices: Vec<Vec<usize>>,   // Restart indices for each block
     bloom_filter: Bloom<String>,
@@ -86,11 +86,11 @@ impl SSTableBuilder {
         if is_restart_point {
             // add to page hash index if we have one
             if let Some(current_hash_index) = self.page_hash_indices.last_mut() {
-                current_hash_index.insert(key.key.as_bytes().to_vec(), self.current_block.len());
+                current_hash_index.insert(key.key.clone(), self.current_block.len());
             } else {
                 self.page_hash_indices.push(HashMap::new());
                 if let Some(current_hash_index) = self.page_hash_indices.last_mut() {
-                    current_hash_index.insert(key.key.as_bytes().to_vec(), 0);
+                    current_hash_index.insert(key.key.clone(), 0);
                 }
             }
 
