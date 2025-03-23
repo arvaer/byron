@@ -3,7 +3,10 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum SSTableError {
     #[error("IO error: {0}")]
-    WriteToFileError(#[from] std::io::Error),
+    FileSystemError(#[from] std::io::Error),
+
+    #[error("Block decode error: {0}")]
+    StringUTF8(#[from] std::string::FromUtf8Error),
 
     #[error("Invalid block size: {0}")]
     InvalidBlockSize(usize),
@@ -25,4 +28,7 @@ pub enum SSTableError {
 
     #[error("Failed to build SSTable: {0}")]
     BuildError(String),
+
+    #[error("Failed to build SSTable: {0}")]
+    NoTableFound(String),
 }

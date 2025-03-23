@@ -138,32 +138,22 @@ impl SSTableBuilder {
         }
 
         if let Some(parent) = self.file_name.parent() {
-            fs::create_dir_all(parent).map_err(SSTableError::WriteToFileError)?;
+            fs::create_dir_all(parent).map_err(SSTableError::FileSystemError)?;
         }
 
-        let file = File::create(&self.file_name).map_err(SSTableError::WriteToFileError)?;
+        let file = File::create(&self.file_name).map_err(SSTableError::FileSystemError)?;
         let mut writer = BufWriter::new(file);
 
         writer
             .write_all(b"SSTB")
-            .map_err(SSTableError::WriteToFileError)?;
-
-        let block_count_bytes = self.blocks.len().encode_var_vec();
-        writer
-            .write_all(&block_count_bytes)
-            .map_err(SSTableError::WriteToFileError)?;
-
-        let entry_count_bytes = self.entry_count().encode_var_vec();
-        writer
-            .write_all(&entry_count_bytes)
-            .map_err(SSTableError::WriteToFileError)?;
+            .map_err(SSTableError::FileSystemError)?;
 
         for (block_idx, block) in self.blocks.iter().enumerate() {
             for kv in block {
                 let kv_bytes = kv.to_str();
                 writer
                     .write_all(&kv_bytes)
-                    .map_err(SSTableError::WriteToFileError)?;
+                    .map_err(SSTableError::FileSystemError)?;
             }
 
             if block_idx < self.restart_indices.len() {
@@ -171,27 +161,27 @@ impl SSTableBuilder {
                 let count_bytes = restarts.len().encode_var_vec();
                 writer
                     .write_all(&count_bytes)
-                    .map_err(SSTableError::WriteToFileError)?;
+                    .map_err(SSTableError::FileSystemError)?;
 
                 for restart in restarts {
                     let restart_bytes = restart.encode_var_vec();
                     writer
                         .write_all(&restart_bytes)
-                        .map_err(SSTableError::WriteToFileError)?;
+                        .map_err(SSTableError::FileSystemError)?;
                 }
             } else {
                 let zero_bytes = 0usize.encode_var_vec();
                 writer
                     .write_all(&zero_bytes)
-                    .map_err(SSTableError::WriteToFileError)?;
+                    .map_err(SSTableError::FileSystemError)?;
             }
         }
 
         writer
             .write_all(b"SSTB")
-            .map_err(SSTableError::WriteToFileError)?;
+            .map_err(SSTableError::FileSystemError)?;
 
-        writer.flush().map_err(SSTableError::WriteToFileError)?;
+        writer.flush().map_err(SSTableError::FileSystemError)?;
 
         Ok(Arc::new(SSTable {
             file_path: self.file_name.clone(),
