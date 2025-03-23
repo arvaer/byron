@@ -21,7 +21,7 @@ pub struct SSTableFeatures {
 
 pub struct SSTableBuilder {
     features: SSTableFeatures,
-    fence_pointers: Vec<(Vec<u8>, usize)>,
+    fence_pointers: Vec<(Arc<str>, usize)>,
     last_key: Option<KeyValue>,
     file_name: PathBuf,
     blocks: Vec<Vec<DeltaEncodedKV>>,   // Store entries in blocks
@@ -96,7 +96,7 @@ impl SSTableBuilder {
 
             if self.current_block.is_empty() && !self.blocks.is_empty() {
                 self.fence_pointers
-                    .push((key.key.as_bytes().to_vec(), self.current_offset));
+                    .push((key.key.into(), self.current_offset));
             }
 
             if let Some(restart_indices) = self.restart_indices.last_mut() {
