@@ -8,6 +8,7 @@ pub enum SSTableError {
     #[error("Block decode error: {0}")]
     StringUTF8(#[from] std::string::FromUtf8Error),
 
+
     #[error("Invalid block size: {0}")]
     InvalidBlockSize(usize),
 
@@ -19,6 +20,9 @@ pub enum SSTableError {
 
     #[error("Bloom filter error: {0}")]
     BloomFilterError(String),
+
+    #[error("DKV Decode error: {0}")]
+    DecodeError(String),
 
     #[error("Empty key not allowed")]
     EmptyKey,

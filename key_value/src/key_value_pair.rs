@@ -6,11 +6,11 @@ use integer_encoding::*;
 #[derive(Debug, Clone, PartialEq, Default, Eq, Hash)]
 //
 pub struct DeltaEncodedKV {
-    shared_bytes: usize,
-    unshared_bytes: usize,
-    value_bytes: usize,
-    key_delta: Box<[u8]>,
-    value: Box<[u8]>,
+    pub shared_bytes: usize,
+    pub unshared_bytes: usize,
+    pub value_bytes: usize,
+    pub key_delta: Box<[u8]>,
+    pub value: Box<[u8]>,
 }
 
 impl DeltaEncodedKV {

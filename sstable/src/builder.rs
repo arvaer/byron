@@ -190,6 +190,7 @@ impl SSTableBuilder {
             entry_count: self.entry_count(),
             page_hash_indices: self.page_hash_indices.clone(),
             fence_pointers: self.fence_pointers.clone(),
+            restart_indices: self.restart_indices.clone()
         }))
     }
 

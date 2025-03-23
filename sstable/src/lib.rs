@@ -1,13 +1,14 @@
 use std::{
     collections::HashMap,
     fs::File,
-    io::{BufReader, Read, Seek, SeekFrom},
+    io::{BufReader, Cursor, Read, Seek, SeekFrom},
     path::PathBuf,
     sync::Arc,
 };
 
 use bloomfilter::Bloom;
 use error::SSTableError;
+use integer_encoding::VarIntReader;
 use key_value::{key_value_pair::DeltaEncodedKV, KeyValue};
 
 mod builder;
@@ -28,29 +29,99 @@ pub struct SSTable {
     //    size_in_kb: usize,
     page_hash_indices: Vec<HashMap<String, usize>>, // One hash index per block
     fence_pointers: Vec<(Arc<str>, usize)>,
+    restart_indices: Vec<Vec<usize>>, // Restart indices for each block
 }
 
 impl SSTable {
-    pub fn get(&self, key: String) -> Result<Arc<str>, SSTableError> {
+    pub fn get(&self, key: String) -> Result<Arc<KeyValue>, SSTableError> {
         if !self.bloom_filter.check(&key) {
             return Err(SSTableError::KeyNotfound);
         }
 
-        let block_idx = self.find_block_with_fence_pointers(key).unwrap_or((0, 1));
+        let block_idx = self
+            .find_block_with_fence_pointers(key.clone())
+            .unwrap_or((0, 1));
         let block_data = self.read_block_from_disk(block_idx)?;
-        let restart_points = &self.restart_indices[block_idx];
-        let entry_position = self.binary_search_with_restarts(block_data, key, restart_points)?;
-        if let Some(position) = self.page_hash_indices[block_idx.0].get(key.as_bytes()) {
-            return self.extract_value_at_position(block_data, position);
+        let kvps: &[u8];
+        let restart_points = self.restart_indices[block_idx.0].clone();
+
+        if let Some(position) = self.page_hash_indices[block_idx.0].get(&key) {
+            // we have a match in the page hash index
+            let restart_point = restart_points[*position];
+            let read_size = 4096 / 16; // this is 4kb / 16 which is a magic number for our
+                                       // restart count. %%TODO stop being lazyjjjjjjjjjjjjjj
+
+            kvps = &block_data[restart_point..restart_point + read_size];
+            if let Some(kvp) = self.deserialize_run_get_key(kvps, key.clone()) {
+                return Ok(Arc::new(kvp));
+            }
         }
 
-        todo!()
+        if let Some(kvp) = self.binary_search_with_restarts(block_data, key, &restart_points) {
+            Ok(Arc::new(kvp))
+        } else{
+            Err(SSTableError::KeyNotfound)
+        }
     }
 
-    /*
+    fn deserialize_run_get_key(&self, run: &[u8], needle: String) -> Option<KeyValue> {
+        let mut cursor = Cursor::new(run);
+        let mut previous_key: Option<KeyValue> = None;
 
-     self.extract_value_at_position(block_data, entry_position)
-    */
+        while (cursor.position() as usize) < run.len() {
+            let shared_bytes = cursor.read_varint().unwrap();
+
+            let unshared_bytes = cursor.read_varint().unwrap();
+
+            let value_bytes = cursor.read_varint().unwrap();
+
+            let mut key_delta = vec![0u8; unshared_bytes];
+            cursor.read_exact(&mut key_delta).unwrap();
+
+            let mut value = vec![0u8; value_bytes];
+            cursor.read_exact(&mut value).unwrap();
+
+            let dkv = DeltaEncodedKV {
+                shared_bytes,
+                unshared_bytes,
+                value_bytes,
+                key_delta: key_delta.into_boxed_slice(),
+                value: value.into_boxed_slice(),
+            };
+
+            let as_key = dkv.reverse(previous_key).unwrap(); // %TODO add better handling of errors
+            if as_key.key == needle {
+                return Some(as_key);
+            }
+            previous_key = Some(as_key);
+        }
+
+        None
+    }
+
+    fn deserialize_first_key_from_run(&self, run: &[u8]) -> Option<KeyValue> {
+        let mut cursor = Cursor::new(run);
+
+        let shared_bytes = cursor.read_varint().unwrap();
+        let unshared_bytes = cursor.read_varint().unwrap();
+        let value_bytes = cursor.read_varint().unwrap();
+
+        let mut key_delta = vec![0u8; unshared_bytes];
+        cursor.read_exact(&mut key_delta).unwrap();
+
+        let mut value = vec![0u8; value_bytes];
+        cursor.read_exact(&mut value).unwrap();
+
+        let dkv = DeltaEncodedKV {
+            shared_bytes,
+            unshared_bytes,
+            value_bytes,
+            key_delta: key_delta.into_boxed_slice(),
+            value: value.into_boxed_slice(),
+        };
+
+        Some(dkv.reverse(None).unwrap())
+    }
 
     // this is not working correctly for case sensetivity. need to fix this in the mean time using
     // linear search because it works
@@ -126,15 +197,36 @@ impl SSTable {
 
     fn binary_search_with_restarts(
         &self,
-        block_data: &[u8],
-        key: &[u8],
-        restart_points: &[usize],
-    ) -> Option<usize> {
-        todo!()
-    }
+        block_data: Arc<[u8]>,
+        key: String,
+        restart_points: &Vec<usize>,
+    ) -> Option<KeyValue> {
+        // so first thing we do is get the midpoint.
+        // we basically replicate the logic above but for retart points. however, we need to decode
+        // the block.
 
-    fn extract_value_at_position(&self, block_data: Arc<[u8]>, position: usize) -> Option<Arc<u8>> {
-        Some(block_data[position..])
+        let mut left = 0;
+        let mut right = 16;
+        let run_size = 4096 / 16;
+
+        while left < right {
+            let mid = left + (right - left) / 2;
+            let run =
+                &block_data[run_size * restart_points[mid]..run_size * restart_points[mid] + 1];
+            if let Some(found_key) = self.deserialize_run_get_key(run, key.clone()) {
+                return Some(found_key);
+            }
+
+            if let Some(keyvalue) = self.deserialize_first_key_from_run(run) {
+                if keyvalue.key > key {
+                    right = mid;
+                } else {
+                    left = mid + 1;
+                }
+            }
+        }
+
+        None
     }
 }
 
@@ -158,6 +250,7 @@ mod tests {
                 entry_count: fence_pointers.len(),
                 page_hash_indices: Vec::new(),
                 fence_pointers,
+                restart_indices: Vec::new(),
             }
         }
     }
