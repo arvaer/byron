@@ -44,7 +44,7 @@ impl SSTable {
         let block_start = if block_idx.0 < self.fence_pointers.len() {
             self.fence_pointers[block_idx.0].1
         } else {
-            4 // Fallback (right after header)
+            4 // Fallback (right after header which is SSTB)
         };
 
         let restart_points = self.restart_indices[block_idx.0].clone();
@@ -112,7 +112,7 @@ impl SSTable {
                 .read(&mut chunk)
                 .map_err(SSTableError::FileSystemError)?;
             if n == 0 {
-                println!("Broke the key!!");
+                println!("Broke the key!! D:");
                 break;
             }
             buffer.extend_from_slice(&chunk[..n]);
@@ -373,19 +373,19 @@ impl SSTable {
         key: String,
         restart_points: &[usize],
     ) -> Result<KeyValue, SSTableError> {
-        println!("DEBUG: Binary searching for key: '{}'", key);
-        println!("DEBUG: Block data size: {} bytes", block_data.len());
-        println!("DEBUG: Restart points: {:?}", restart_points);
         // Try linear scan first for debugging
         println!("DEBUG: defaulting to linear scan for now");
-
         let kv = self.deserialize_run_get_key(&block_data, key.clone());
         match kv {
             Ok(kv) => return Ok(kv),
             Err(SSTableError::KVPexceedsBlock(e)) => return Err(SSTableError::KVPexceedsBlock(e)),
             _ => {}
         }
-
+        // This is dead code hopefully. its a failed attempt at bsearching the restart pointers
+        println!("WARNING-- YOU RELALY SHOUDLNT BE HERE");
+        println!("DEBUG: Binary searching for key: '{}'", key);
+        println!("DEBUG: Block data size: {} bytes", block_data.len());
+        println!("DEBUG: Restart points: {:?}", restart_points);
         println!("DEBUG: Binary search complete, key not found");
         // Handle empty restart points
         if restart_points.is_empty() {
@@ -462,11 +462,20 @@ mod tests {
     use bloomfilter::Bloom;
     use std::path::PathBuf;
     use std::sync::Arc;
+    use builder::{SSTableBuilder, SSTableFeatures};
+    use key_value::KeyValue;
+    use tempfile::tempdir;
 
-    // Helper constructor for testing purposes
+    fn create_test_kv(key: &str, value: &str) -> KeyValue {
+        KeyValue {
+            key: key.to_string(),
+            value: value.to_string(),
+        }
+    }
+
     impl SSTable {
         fn new_for_tests(fence_pointers: Vec<(Arc<str>, usize)>) -> Self {
-            // Create a minimal valid bloom filter for testing
+            // create a minimal valid bloom filter for testing
             let bloom = Bloom::new_for_fp_rate(100, 0.01).unwrap();
 
             Self {
@@ -629,25 +638,12 @@ mod tests {
     // This test ensures we correctly handle the upper_bound calculation
     #[test]
     fn test_upper_bound_calculation() {
-        // Test with exactly 2 fence pointers
         let fence_pointers = create_fence_pointers(vec!["a", "z"]);
         let sstable = SSTable::new_for_tests(fence_pointers);
-
-        // Should still work properly with just 2 pointers
         let result = sstable.find_block_with_fence_pointers("m".to_string());
         assert_eq!(result, Some((0, 1)));
     }
 
-    use builder::{SSTableBuilder, SSTableFeatures};
-    use key_value::KeyValue;
-    use tempfile::tempdir;
-
-    fn create_test_kv(key: &str, value: &str) -> KeyValue {
-        KeyValue {
-            key: key.to_string(),
-            value: value.to_string(),
-        }
-    }
 
     #[test]
     fn test_get_existing_key() -> Result<(), SSTableError> {
