@@ -1,0 +1,10 @@
+[package]
+name = "lsm"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+key_value = {path = "../key_value"}
+sstable = {path = "../sstable"}
+memtable = {path = "../memtable"}
+thiserror = "2.0.12"

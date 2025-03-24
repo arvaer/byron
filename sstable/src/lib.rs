@@ -460,10 +460,10 @@ impl SSTable {
 mod tests {
     use super::*;
     use bloomfilter::Bloom;
-    use std::path::PathBuf;
-    use std::sync::Arc;
     use builder::{SSTableBuilder, SSTableFeatures};
     use key_value::KeyValue;
+    use std::path::PathBuf;
+    use std::sync::Arc;
     use tempfile::tempdir;
 
     fn create_test_kv(key: &str, value: &str) -> KeyValue {
@@ -644,7 +644,6 @@ mod tests {
         assert_eq!(result, Some((0, 1)));
     }
 
-
     #[test]
     fn test_get_existing_key() -> Result<(), SSTableError> {
         println!("========= STARTING TEST_GET_EXISTING_KEY =========");
@@ -746,10 +745,7 @@ mod tests {
         if block_idx.0 < sstable.page_hash_indices.len() {
             let page_hash = &sstable.page_hash_indices[block_idx.0];
             println!("page hash count: {}", page_hash.len());
-            println!(
-                "does page has key? {}",
-                page_hash.contains_key(test_key)
-            );
+            println!("does page has key? {}", page_hash.contains_key(test_key));
 
             if let Some(pos) = page_hash.get(test_key) {
                 println!("position in page hash: {}", pos);
