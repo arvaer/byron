@@ -59,7 +59,7 @@ impl SSTableBuilder {
             current_block: Vec::new(),
             current_block_size: 0,
             page_hash_indices: Vec::new(),
-            current_offset: 0,
+            current_offset: 4, // "SSTB"
             restart_indices: Vec::new(),
             bloom_filter: filter,
         })
@@ -69,42 +69,38 @@ impl SSTableBuilder {
         if key.key.is_empty() {
             return Err(SSTableError::EmptyKey);
         }
-
         self.bloom_filter.set(&key.key);
 
-        let dkv = DeltaEncodedKV::forward(self.last_key.clone(), key.clone());
-        let entry_size = dkv.calculate_size();
-
-        if self.current_block_size + entry_size > BLOCK_SIZE
-            && self.current_block_size > (0.9 * BLOCK_SIZE as f64) as usize
-            && !self.current_block.is_empty()
-        {
+        let tentative = DeltaEncodedKV::forward(self.last_key.clone(), key.clone());
+        let entry_size = tentative.calculate_size();
+        if self.current_block_size + entry_size > BLOCK_SIZE && !self.current_block.is_empty() {
             self.seal_current_block();
         }
 
         if self.current_block.is_empty() {
             self.restart_indices.push(vec![0]);
             self.page_hash_indices.push(HashMap::new());
-            if !self.blocks.is_empty() {
-                self.fence_pointers
-                    .push((key.key.into(), self.current_offset));
-            }
+            self.fence_pointers
+                .push((key.key.clone().into(), self.current_offset));
+            self.last_key = None;
         } else if self.current_block.len() % RESTART_INTERVAL == 0 {
             if let Some(restart_points) = self.restart_indices.last_mut() {
                 restart_points.push(self.current_block_size);
             }
             if let Some(current_hash_index) = self.page_hash_indices.last_mut() {
-                current_hash_index.insert(key.key.clone(), self.current_block_size);
+                current_hash_index.insert(
+                    key.key.clone(),
+                    self.restart_indices.last().unwrap().len() - 1,
+                );
             }
             self.last_key = None;
-        } else {
-            self.last_key = Some(key.clone());
         }
-
+        // recompute is hacky but idk .
+        let dkv = DeltaEncodedKV::forward(self.last_key.clone(), key.clone());
+        let entry_size = dkv.calculate_size();
         self.current_block.push(dkv);
         self.current_block_size += entry_size;
-        self.current_offset += entry_size;
-
+        self.last_key = Some(key);
         Ok(())
     }
 
@@ -118,8 +114,9 @@ impl SSTableBuilder {
         }
 
         let block = std::mem::take(&mut self.current_block);
-        self.blocks.push(block);
 
+        self.current_offset += self.current_block_size;
+        self.blocks.push(block);
         self.current_block_size = 0;
     }
 
@@ -127,11 +124,9 @@ impl SSTableBuilder {
         if !self.current_block.is_empty() {
             self.seal_current_block();
         }
-
         if let Some(parent) = self.file_name.parent() {
             fs::create_dir_all(parent).map_err(SSTableError::FileSystemError)?;
         }
-
         let file = File::create(&self.file_name).map_err(SSTableError::FileSystemError)?;
         let mut writer = BufWriter::new(file);
 
@@ -139,41 +134,23 @@ impl SSTableBuilder {
             .write_all(b"SSTB")
             .map_err(SSTableError::FileSystemError)?;
 
-        for (block_idx, block) in self.blocks.iter().enumerate() {
+        let mut current_position = 4; // Start after header
+
+        for block in self.blocks.iter() {
             for kv in block {
                 let kv_bytes = kv.to_str();
                 writer
                     .write_all(&kv_bytes)
                     .map_err(SSTableError::FileSystemError)?;
-            }
 
-            if block_idx < self.restart_indices.len() {
-                let restarts = &self.restart_indices[block_idx];
-                let count_bytes = restarts.len().encode_var_vec();
-                writer
-                    .write_all(&count_bytes)
-                    .map_err(SSTableError::FileSystemError)?;
-
-                for restart in restarts {
-                    let restart_bytes = restart.encode_var_vec();
-                    writer
-                        .write_all(&restart_bytes)
-                        .map_err(SSTableError::FileSystemError)?;
-                }
-            } else {
-                let zero_bytes = 0usize.encode_var_vec();
-                writer
-                    .write_all(&zero_bytes)
-                    .map_err(SSTableError::FileSystemError)?;
+                current_position += kv_bytes.len();
             }
         }
 
         writer
             .write_all(b"SSTB")
             .map_err(SSTableError::FileSystemError)?;
-
         writer.flush().map_err(SSTableError::FileSystemError)?;
-
         Ok(Arc::new(SSTable {
             file_path: self.file_name.clone(),
             fd: None,
@@ -201,7 +178,6 @@ impl SSTableBuilder {
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
