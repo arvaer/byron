@@ -14,10 +14,12 @@ pub trait MemTableOperations {
     fn flush(&self) -> Result<SSTable, MemTableError>;
 }
 
+#[derive(Debug)]
 pub enum DataStructure {
     Vector(VectorMemTable),
 }
 
+#[derive(Debug)]
 pub struct MemTable {
     inner: DataStructure,
 }

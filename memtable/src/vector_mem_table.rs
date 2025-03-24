@@ -3,6 +3,7 @@ use sstable::SSTable;
 
 use crate::MemTableOperations;
 
+#[derive(Debug)]
 pub struct VectorMemTable {
     data: Vec<KeyValue>,
     max_entries: usize,
