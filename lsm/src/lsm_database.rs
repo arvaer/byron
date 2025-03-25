@@ -31,7 +31,7 @@ impl LsmDatabase {
     }
 
     fn flash(&mut self) -> std::thread::JoinHandle<Arc<SSTable>> {
-        let old_table = mem::replace(
+        let mut old_table = mem::replace(
             &mut self.primary,
             MemTableBuilder::default().max_entries(1000).build(),
         );

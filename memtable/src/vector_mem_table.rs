@@ -42,12 +42,13 @@ impl MemTableOperations for VectorMemTable {
     }
 
     fn flush(
-        &self,
+        &mut self,
         path: PathBuf,
         table_params: SSTableFeatures,
     ) -> Result<Arc<SSTable>, crate::error::MemTableError> {
         let mut builder = SSTableBuilder::new(table_params, &path, 1000)?;
-        for i in &self.data {
+        self.data.sort();
+        for i in &self.data{
             let _ = builder.add_from_kv(i.clone());
         }
         let builder = builder.build()?;

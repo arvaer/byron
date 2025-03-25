@@ -11,7 +11,7 @@ pub trait MemTableOperations {
     fn put(&mut self, key: String, value: String);
     fn get(&self, key: &str) -> Option<Box<KeyValue>>;
     fn at_capacity(&self) -> bool;
-    fn flush( &self, path: PathBuf, table_params: SSTableFeatures,) -> Result<Arc<SSTable>, crate::error::MemTableError>;
+    fn flush( &mut self, path: PathBuf, table_params: SSTableFeatures,) -> Result<Arc<SSTable>, crate::error::MemTableError>;
 }
 
 #[derive(Debug)]
@@ -54,8 +54,8 @@ impl MemTableOperations for MemTable {
         }
     }
 
-    fn flush( &self, path: PathBuf, table_params: SSTableFeatures,) -> Result<Arc<SSTable>, crate::error::MemTableError>{
-        match &self.inner {
+    fn flush( &mut self, path: PathBuf, table_params: SSTableFeatures,) -> Result<Arc<SSTable>, crate::error::MemTableError>{
+        match &mut self.inner {
             DataStructure::Vector(memtable) => memtable.flush(path, table_params),
             _ => unimplemented!(),
         }
