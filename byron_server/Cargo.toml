@@ -12,12 +12,13 @@ name = "byron-client"
 path = "src/client.rs"
 
 [dependencies]
-tonic = "*"
-prost = "0.13"
+tonic = "0.12"
+tonic-reflection = "0.12"
+prost = "0.13"   # Updated version
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
-lsm = {path = "../lsm/"}
+lsm = { path = "../lsm/" }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 
 [build-dependencies]
-tonic-build = "*"
+tonic-build = "0.12"

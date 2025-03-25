@@ -10,6 +10,9 @@ use byron::*;
 
 pub mod byron {
     tonic::include_proto!("byron");
+
+    pub(crate) const FILE_DESCRIPTOR_SET: &[u8] =
+        tonic::include_file_descriptor_set!("byron_descriptor");
 }
 
 #[derive(Debug, Default)]
@@ -35,7 +38,10 @@ impl Byron for ByronServerContext {
             .parse()
             .map_err(|e| Status::invalid_argument(format!("Value parsing error: {:?}", e)))?;
 
-        let response = GetResponse { key: input.key, value };
+        let response = GetResponse {
+            key: input.key,
+            value,
+        };
         tracing::info!("Returning get response: {:?}", response);
         Ok(Response::new(response))
     }
@@ -70,13 +76,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let addr = "[::1]:50051".parse()?;
     let byron = ByronServerContext::default();
+    let reflection_service = tonic_reflection::server::Builder::configure()
+        .register_encoded_file_descriptor_set(byron::FILE_DESCRIPTOR_SET)
+        .build_v1()
+        .unwrap();
 
     tracing::info!("Starting Byron gRPC server on socket address: {}", addr);
     Server::builder()
         .add_service(ByronServer::new(byron))
+        .add_service(reflection_service)
         .serve(addr)
         .await?;
 
     Ok(())
 }
-

@@ -5,13 +5,22 @@ use std::{mem, path::PathBuf, sync::Arc, thread};
 
 use crate::{error::LsmError, lsm_operators::LsmSearchOperators};
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct LsmDatabase {
     pub primary: MemTable,
     pub tables: Vec<Arc<SSTable>>,
     pub parent_directory: PathBuf,
 }
 
+impl Default for LsmDatabase {
+    fn default() -> Self {
+        Self {
+            primary: MemTable::default(),
+            tables: Vec::new(),
+            parent_directory: PathBuf::from("./data"),
+        }
+    }
+}
 impl LsmDatabase {
     pub fn new(parent_directory: String) -> Self {
         Self {
