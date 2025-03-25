@@ -1,17 +1,17 @@
-mod error;
+pub mod error;
 pub mod mem_table_builder;
 mod vector_mem_table;
 
-use error::MemTableError;
-use sstable::SSTable;
+use std::{path::PathBuf, sync::Arc};
+use key_value::KeyValue;
+use sstable::{builder::SSTableFeatures, SSTable};
 use vector_mem_table::VectorMemTable;
-
 
 pub trait MemTableOperations {
     fn put(&mut self, key: String, value: String);
-    fn get(&self, key: &str) -> Option<&String>;
-    fn capacity(&self) -> usize;
-    fn flush(&self) -> Result<SSTable, MemTableError>;
+    fn get(&self, key: &str) -> Option<Box<KeyValue>>;
+    fn at_capacity(&self) -> bool;
+    fn flush( &self, path: PathBuf, table_params: SSTableFeatures,) -> Result<Arc<SSTable>, crate::error::MemTableError>;
 }
 
 #[derive(Debug)]
@@ -33,7 +33,7 @@ impl MemTableOperations for MemTable {
         }
     }
 
-    fn get(&self, key: &str) -> Option<&String> {
+    fn get(&self, key: &str) -> Option<Box<KeyValue>> {
         match &self.inner {
             //shared reference
             DataStructure::Vector(memtable) => memtable.get(key),
@@ -41,16 +41,16 @@ impl MemTableOperations for MemTable {
         }
     }
 
-    fn capacity(&self) -> usize {
+    fn at_capacity(&self) -> bool {
         match &self.inner {
-            DataStructure::Vector(memtable) => memtable.capacity(),
+            DataStructure::Vector(memtable) => memtable.at_capacity(),
             _ => unimplemented!(),
         }
     }
 
-    fn flush(&self) -> Result<SSTable, MemTableError> {
+    fn flush( &self, path: PathBuf, table_params: SSTableFeatures,) -> Result<Arc<SSTable>, crate::error::MemTableError>{
         match &self.inner {
-            DataStructure::Vector(memtable) => memtable.flush(),
+            DataStructure::Vector(memtable) => memtable.flush(path, table_params),
             _ => unimplemented!(),
         }
     }

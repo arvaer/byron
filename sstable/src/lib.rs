@@ -11,8 +11,8 @@ use error::SSTableError;
 use integer_encoding::VarIntReader;
 use key_value::{key_value_pair::DeltaEncodedKV, KeyValue};
 
-mod builder;
-mod error;
+pub mod builder;
+pub mod error;
 mod operations;
 
 #[derive(Debug)]

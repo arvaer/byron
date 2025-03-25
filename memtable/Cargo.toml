@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 key_value = { path = "../key_value" }
 sstable = { path = "../sstable"}
+thiserror = "2.0.12"
