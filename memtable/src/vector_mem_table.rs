@@ -7,7 +7,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use crate::{error::MemTableError, MemTableOperations};
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct VectorMemTable {
     data: Vec<KeyValue>,
     max_entries: usize,

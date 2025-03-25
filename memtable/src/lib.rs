@@ -19,7 +19,13 @@ pub enum DataStructure {
     Vector(VectorMemTable),
 }
 
-#[derive(Debug)]
+impl Default for DataStructure {
+    fn default() -> Self {
+        DataStructure::Vector(VectorMemTable::default())
+    }
+}
+
+#[derive(Debug, Default)]
 pub struct MemTable {
     inner: DataStructure,
 }

@@ -16,7 +16,7 @@ thiserror = "2.0.12"
 rand = "0.9.0"
 
 [workspace]
-members = [ "key_value", "lsm",
+members = [ "byron_server", "key_value", "lsm",
     "memtable", "sstable",
 ]
 

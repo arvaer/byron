@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package lsm;
+package byron;
 
 import "google/protobuf/empty.proto";
 
@@ -24,7 +24,7 @@ message GetRequest {
 }
 
 message GetResponse {
-  bool found = 1;  // true if the key exists in the tree
+  int32 key = 1;
   int32 value = 2; // valid only when found is true
 }
 
@@ -85,8 +85,8 @@ service byron {
   rpc Put(PutRequest) returns (PutResponse);
   rpc Get(GetRequest) returns (GetResponse);
   rpc Range(RangeRequest) returns (RangeResponse);
-  rpc Delete(DeleteRequest) returns (DeleteResponse);
-  rpc Load(LoadRequest) returns (LoadResponse);
-  rpc PrintStats(google.protobuf.Empty) returns (StatsResponse);
+ // rpc Delete(DeleteRequest) returns (DeleteResponse);
+//  rpc Load(LoadRequest) returns (LoadResponse);
+  //rpc PrintStats(google.protobuf.Empty) returns (StatsResponse);
 }
 

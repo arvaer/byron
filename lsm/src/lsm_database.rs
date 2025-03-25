@@ -1,11 +1,11 @@
 use key_value::KeyValue;
 use memtable::{mem_table_builder::MemTableBuilder, MemTable, MemTableOperations};
 use sstable::{builder::SSTableFeatures, error::SSTableError, SSTable};
-use std::{mem, path::PathBuf, sync::Arc, thread};
+use std::{mem, path::PathBuf, sync::{RwLock, Arc}, thread};
 
 use crate::{error::LsmError, lsm_operators::LsmSearchOperators};
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct LsmDatabase {
     pub primary: MemTable,
     pub tables: Vec<Arc<SSTable>>,
