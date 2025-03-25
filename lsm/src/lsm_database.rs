@@ -10,6 +10,7 @@ pub struct LsmDatabase {
     pub primary: MemTable,
     pub tables: Vec<Arc<SSTable>>,
     pub parent_directory: PathBuf,
+    table_sizes : Vec<usize>
 }
 
 impl Default for LsmDatabase {
@@ -18,6 +19,7 @@ impl Default for LsmDatabase {
             primary: MemTable::default(),
             tables: Vec::new(),
             parent_directory: PathBuf::from("./data"),
+            table_sizes: Vec::new()
         }
     }
 }
@@ -27,6 +29,7 @@ impl LsmDatabase {
             primary: MemTableBuilder::default().max_entries(1000).build(),
             tables: Vec::new(),
             parent_directory: parent_directory.into(),
+            table_sizes: Vec::new()
         }
     }
 
@@ -35,6 +38,7 @@ impl LsmDatabase {
             &mut self.primary,
             MemTableBuilder::default().max_entries(1000).build(),
         );
+        self.table_sizes.push(1000);
 
         let parent_directory = self.parent_directory.clone();
         let tables_len = self.tables.len();
@@ -57,7 +61,7 @@ impl LsmDatabase {
 }
 
 impl LsmSearchOperators for LsmDatabase {
-     fn get(&self, key: String) -> Result<Arc<KeyValue>, LsmError> {
+    fn get(&self, key: String) -> Result<Arc<KeyValue>, LsmError> {
         if let Some(kv) = self.primary.get(&key) {
             return Ok(kv.into());
         }
