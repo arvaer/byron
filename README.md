@@ -1,6 +1,6 @@
-# Byron: Log-Structured Merge Tree Database
+# byron: Log-Structured Merge Tree Database
 
-Byron is a high-performance key-value database implementation built on the Log-Structured Merge Tree (LSM) architecture, written in Rust. It provides efficient storage and retrieval mechanisms for key-value pairs with support for standard operations like put, get, range queries, and delete.
+byron is a high-performance key-value database implementation built on the Log-Structured Merge Tree (LSM) architecture, written in Rust. It provides efficient storage and retrieval mechanisms for key-value pairs with support for standard operations like put, get, range queries, and delete.
 
 ## Features
 
@@ -13,7 +13,7 @@ Byron is a high-performance key-value database implementation built on the Log-S
 
 ## Architecture
 
-Byron is organized as a Rust workspace with several modular components:
+byron is organized as a Rust workspace with several modular components:
 
 ### Key Components
 
@@ -69,5 +69,5 @@ fn main() {
 
 ## Project Status
 
-Byron is currently under active development. Core functionality is implemented, but some features remain in progress.
+byron is currently under active development. Core functionality is implemented, but some features remain in progress.
 
