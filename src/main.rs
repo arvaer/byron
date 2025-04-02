@@ -5,7 +5,7 @@ use rand::Rng;
 
 fn main() {
     env_logger::init();
-    let parent_directory = "./data".to_string();
+    let parent_directory = "/mnt/C/data".to_string();
     let mut db = LsmDatabase::new(parent_directory);
 
     // Time 10,000,000 writes.

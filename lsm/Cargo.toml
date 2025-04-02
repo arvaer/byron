@@ -7,4 +7,5 @@ edition = "2024"
 key_value = {path = "../key_value"}
 sstable = {path = "../sstable"}
 memtable = {path = "../memtable"}
+bloomfilter = "3"
 thiserror = "2.0.12"

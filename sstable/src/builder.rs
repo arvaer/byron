@@ -1,5 +1,4 @@
 use crate::{error::SSTableError, SSTable};
-use bloomfilter::Bloom;
 use integer_encoding::VarInt;
 use key_value::{key_value_pair::DeltaEncodedKV, KeyValue};
 use std::{
@@ -19,6 +18,7 @@ pub struct SSTableFeatures {
     pub fpr: f64,
 }
 
+
 pub struct SSTableBuilder {
     pub features: SSTableFeatures,
     pub fence_pointers: Vec<(Arc<str>, usize)>,
@@ -30,7 +30,6 @@ pub struct SSTableBuilder {
     pub page_hash_indices: Vec<HashMap<String, usize>>, // One hash index per block
     pub current_offset: usize,            // File offset
     pub restart_indices: Vec<Vec<usize>>, // Restart indices for each block
-    pub bloom_filter: Bloom<String>,
 }
 
 impl SSTableBuilder {
@@ -39,16 +38,15 @@ impl SSTableBuilder {
         file_name: &Path,
         all_items_len: usize,
     ) -> Result<Self, SSTableError> {
-        if all_items_len == 0 {
-            return Err(SSTableError::InvalidItemCount);
-        }
+        //if all_items_len == 0 {
+         //   return Err(SSTableError::InvalidItemCount);
+        //}
 
-        if features.fpr <= 0.0 || features.fpr >= 1.0 {
-            return Err(SSTableError::InvalidFalsePositiveRate(features.fpr));
-        }
+        //if features.fpr <= 0.0 || features.fpr >= 1.0 {
+         //   return Err(SSTableError::InvalidFalsePositiveRate(features.fpr));
+        //}
 
-        let filter = Bloom::new_for_fp_rate(all_items_len, features.fpr)
-            .map_err(|e| SSTableError::BloomFilterError(e.to_string()))?;
+        //  let filter = Bloom::new_for_fp_rate(all_items_len, features.fpr) .map_err(|e| SSTableError::BloomFilterError(e.to_string()))?;
 
         Ok(Self {
             features,
@@ -61,7 +59,6 @@ impl SSTableBuilder {
             page_hash_indices: Vec::new(),
             current_offset: 4, // "SSTB"
             restart_indices: Vec::new(),
-            bloom_filter: filter,
         })
     }
 
@@ -69,7 +66,6 @@ impl SSTableBuilder {
         if key.key.is_empty() {
             return Err(SSTableError::EmptyKey);
         }
-        self.bloom_filter.set(&key.key);
 
         let tentative = DeltaEncodedKV::forward(self.last_key.clone(), key.clone());
         let entry_size = tentative.calculate_size();
@@ -154,7 +150,6 @@ impl SSTableBuilder {
         Ok(Arc::new(SSTable {
             file_path: self.file_name.clone(),
             fd: None,
-            bloom_filter: self.bloom_filter.clone(),
             page_hash_indices: self.page_hash_indices.clone(),
             fence_pointers: self.fence_pointers.clone(),
             restart_indices: self.restart_indices.clone(),
@@ -377,36 +372,6 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_bloom_filter() -> Result<(), SSTableError> {
-        let temp_dir = tempdir().unwrap();
-        let file_path = temp_dir.path().join("test.sst");
-
-        let features = SSTableFeatures {
-            lz: false,
-            fpr: 0.01,
-        };
-
-        let mut builder = SSTableBuilder::new(features, &file_path, 100)?;
-
-        for i in 0..10 {
-            let key = format!("key-{:05}", i);
-            builder.add_from_kv(create_test_kv(&key, "value"))?;
-        }
-
-        for i in 0..10 {
-            let key = format!("key-{:05}", i);
-            assert!(builder.bloom_filter.check(&key));
-        }
-
-        // note: this might fail lmao
-        let nonexistent = String::from("nonexistent-key");
-        if builder.bloom_filter.check(&nonexistent) {
-            println!("Note: Bloom filter false positive detected for '{nonexistent}' - this is expected occasionally");
-        }
-
-        Ok(())
-    }
 
     #[test]
     fn test_build_sstable() -> Result<(), SSTableError> {

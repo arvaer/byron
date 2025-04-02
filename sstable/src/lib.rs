@@ -7,7 +7,6 @@ use std::{
 };
 
 use block_iter::SSTableBlockIterator;
-use bloomfilter::Bloom;
 use chained_blocks::SSTableIterator;
 use error::SSTableError;
 use integer_encoding::VarIntReader;
@@ -15,6 +14,7 @@ use key_value::{key_value_pair::DeltaEncodedKV, KeyValue};
 
 mod block_iter;
 pub mod builder;
+pub mod streamed_builder;
 mod chained_blocks;
 pub mod error;
 mod operations;
@@ -23,7 +23,6 @@ mod operations;
 pub struct SSTable {
     file_path: PathBuf,
     fd: Option<File>,
-    bloom_filter: Bloom<String>,
     page_hash_indices: Vec<HashMap<String, usize>>, // One hash index per block
     fence_pointers: Vec<(Arc<str>, usize)>,
     restart_indices: Vec<Vec<usize>>, // Restart indices for each block
@@ -31,9 +30,6 @@ pub struct SSTable {
 
 impl SSTable {
     pub fn get(&self, key: String) -> Result<Arc<KeyValue>, SSTableError> {
-        if !self.bloom_filter.check(&key) {
-            return Err(SSTableError::KeyNotfound);
-        }
         let block_idx = self
             .find_block_with_fence_pointers(key.clone())
             .unwrap_or((0, 1));
@@ -491,7 +487,6 @@ impl <'a> IntoIterator for &'a SSTable {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bloomfilter::Bloom;
     use builder::{SSTableBuilder, SSTableFeatures};
     use key_value::KeyValue;
     use std::path::PathBuf;
@@ -508,12 +503,11 @@ mod tests {
     impl SSTable {
         fn new_for_tests(fence_pointers: Vec<(Arc<str>, usize)>) -> Self {
             // create a minimal valid bloom filter for testing
-            let bloom = Bloom::new_for_fp_rate(100, 0.01).unwrap();
+            //let bloom = Bloom::new_for_fp_rate(100, 0.01).unwrap();
 
             Self {
                 file_path: PathBuf::from("test.sst"),
                 fd: None,
-                bloom_filter: bloom,
                 page_hash_indices: Vec::new(),
                 fence_pointers,
                 restart_indices: Vec::new(),
@@ -745,8 +739,6 @@ mod tests {
         log::info!("file size: {} bytes", file_size);
 
         log::info!("checking if key '{}' is in bloom filter...", test_key);
-        let bloom_result = sstable.bloom_filter.check(&test_key.to_string());
-        log::info!("bloom filter result: {}", bloom_result);
 
         log::info!("finding block with fence pointers...");
         let block_idx = sstable
@@ -917,7 +909,6 @@ mod tests {
         let sstable = SSTable {
             file_path: file_path.clone(),
             fd: None,
-            bloom_filter: builder.bloom_filter.clone(),
             page_hash_indices: builder.page_hash_indices.clone(),
             fence_pointers: builder.fence_pointers.clone(),
             restart_indices: builder.restart_indices.clone(),
@@ -958,7 +949,6 @@ mod tests {
         let sstable = SSTable {
             file_path: file_path.clone(),
             fd: None, // Testing with closed file
-            bloom_filter: builder.bloom_filter.clone(),
             page_hash_indices: builder.page_hash_indices.clone(),
             fence_pointers: builder.fence_pointers.clone(),
             restart_indices: builder.restart_indices.clone(),
