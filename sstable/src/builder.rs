@@ -19,7 +19,6 @@ pub struct SSTableFeatures {
     pub fpr: f64,
 }
 
-
 pub struct SSTableBuilder {
     pub fence_pointers: Vec<(Arc<str>, usize)>,
     pub last_key: Option<KeyValue>,
@@ -30,7 +29,8 @@ pub struct SSTableBuilder {
     pub page_hash_indices: Vec<HashMap<String, usize>>, // One hash index per block
     pub current_offset: usize,            // File offset
     pub restart_indices: Vec<Vec<usize>>, // Restart indices for each block
-    pub filter: Option<Bloom<String>>
+    pub filter: Option<Bloom<String>>,
+    pub entry_count: usize,
 }
 
 impl SSTableBuilder {
@@ -41,7 +41,8 @@ impl SSTableBuilder {
         if fpr <= 0.0 || fpr >= 1.0 {
             return Err(SSTableError::InvalidFalsePositiveRate(fpr));
         }
-          let filter = Bloom::new_for_fp_rate(item_count, fpr) .map_err(|e| SSTableError::BloomFilterError(e.to_string()))?;
+        let filter = Bloom::new_for_fp_rate(item_count, fpr)
+            .map_err(|e| SSTableError::BloomFilterError(e.to_string()))?;
 
         Ok(Self {
             fence_pointers: Vec::new(),
@@ -53,7 +54,8 @@ impl SSTableBuilder {
             page_hash_indices: Vec::new(),
             current_offset: 4, // "SSTB"
             restart_indices: Vec::new(),
-            filter: Some(filter)
+            filter: Some(filter),
+            entry_count: 0
         })
     }
 
@@ -147,7 +149,8 @@ impl SSTableBuilder {
             page_hash_indices: self.page_hash_indices.clone(),
             fence_pointers: self.fence_pointers.clone(),
             restart_indices: self.restart_indices.clone(),
-            bloom_filter: Arc::new(self.filter.take().expect("Filter taken"))
+            bloom_filter: Arc::new(self.filter.take().expect("Filter taken")),
+            actual_item_count: self.entry_count
         }))
     }
 
@@ -366,7 +369,6 @@ mod tests {
 
         Ok(())
     }
-
 
     #[test]
     fn test_build_sstable() -> Result<(), SSTableError> {

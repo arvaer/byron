@@ -11,7 +11,6 @@ pub struct LsmDatabase {
     pub tables: Vec<Arc<SSTable>>,
     pub capacity_expansion_factor: usize, //sshould be a whole number
     pub parent_directory: PathBuf,
-    pub table_sizes : HashMap<String, usize>,
 }
 
 impl Default for LsmDatabase {
@@ -20,7 +19,6 @@ impl Default for LsmDatabase {
             primary: MemTable::default(),
             tables: Vec::new(),
             parent_directory: PathBuf::from("./data"),
-            table_sizes: HashMap::new(),
             capacity_expansion_factor: 4,
         }
     }
@@ -32,7 +30,6 @@ impl LsmDatabase {
             primary: MemTableBuilder::default().max_entries(1000).build(),
             tables: Vec::new(),
             parent_directory: parent_directory.into(),
-            table_sizes: HashMap::new(),
             capacity_expansion_factor: capacity_expansion_factor.unwrap_or(4)
         }
     }
@@ -47,7 +44,6 @@ impl LsmDatabase {
         let tables_len = self.tables.len();
         let features = self.calculate_sstable_features();
 
-        self.table_sizes.insert(format!("sstable-id-{}", tables_len), 1000);
         thread::spawn(move || {
             let path = parent_directory.join(format!("sstable-id-{}", tables_len));
             old_table
@@ -70,7 +66,7 @@ impl LsmSearchOperators for LsmDatabase {
             return Ok(kv.into());
         }
 
-        for sstable in self.tables.iter().rev() {
+        for sstable in self.tables.iter() {
             match sstable.get(key.clone()) {
                 Ok(kv) => return Ok(kv),
                 Err(SSTableError::KeyNotfound) => continue,

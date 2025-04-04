@@ -27,11 +27,16 @@ pub struct SSTable {
     page_hash_indices: Vec<HashMap<String, usize>>, // One hash index per block
     fence_pointers: Vec<(Arc<str>, usize)>,
     restart_indices: Vec<Vec<usize>>, // Restart indices for each block
-    bloom_filter: Arc<Bloom<String>>
+    bloom_filter: Arc<Bloom<String>>,
+    actual_item_count: usize
 }
 
 impl SSTable {
     pub fn get(&self, key: String) -> Result<Arc<KeyValue>, SSTableError> {
+        if !self.bloom_filter.check(&key) {
+            return Err(SSTableError::KeyNotfound);
+        }
+
         let block_idx = self
             .find_block_with_fence_pointers(key.clone())
             .unwrap_or((0, 1));

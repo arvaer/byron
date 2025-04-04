@@ -147,6 +147,7 @@ impl StreamedSSTableBuilder {
             fence_pointers: self.fence_pointers.clone(),
             restart_indices: self.restart_indices.clone(),
             bloom_filter: Arc::new(self.filter),
+            actual_item_count: self.entry_count
         }))
     }
 }
