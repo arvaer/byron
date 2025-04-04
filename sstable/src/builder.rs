@@ -15,13 +15,12 @@ const RESTART_INTERVAL: usize = 16;
 
 #[derive(Debug, Default)]
 pub struct SSTableFeatures {
-    pub lz: bool,
+    pub item_count: usize,
     pub fpr: f64,
 }
 
 
 pub struct SSTableBuilder {
-    pub features: SSTableFeatures,
     pub fence_pointers: Vec<(Arc<str>, usize)>,
     pub last_key: Option<KeyValue>,
     pub file_name: PathBuf,
@@ -36,17 +35,15 @@ pub struct SSTableBuilder {
 
 impl SSTableBuilder {
     pub fn new(
-        features: SSTableFeatures,
+        SSTableFeatures { item_count, fpr }: SSTableFeatures,
         file_name: &Path,
-        all_items_len: usize
     ) -> Result<Self, SSTableError> {
-        if features.fpr <= 0.0 || features.fpr >= 1.0 {
-            return Err(SSTableError::InvalidFalsePositiveRate(features.fpr));
+        if fpr <= 0.0 || fpr >= 1.0 {
+            return Err(SSTableError::InvalidFalsePositiveRate(fpr));
         }
-          let filter = Bloom::new_for_fp_rate(all_items_len, features.fpr) .map_err(|e| SSTableError::BloomFilterError(e.to_string()))?;
+          let filter = Bloom::new_for_fp_rate(item_count, fpr) .map_err(|e| SSTableError::BloomFilterError(e.to_string()))?;
 
         Ok(Self {
-            features,
             fence_pointers: Vec::new(),
             last_key: None,
             file_name: file_name.to_path_buf(),
@@ -191,11 +188,11 @@ mod tests {
         let file_path = temp_dir.path().join("test.sst");
 
         let features = SSTableFeatures {
-            lz: false,
+            item_count: 0,
             fpr: 0.01,
         };
 
-        let builder = SSTableBuilder::new(features, &file_path, 100)?;
+        let builder = SSTableBuilder::new(features, &file_path)?;
 
         assert_eq!(builder.entry_count(), 0);
         assert_eq!(builder.block_count(), 0);
@@ -212,11 +209,11 @@ mod tests {
 
         // Test invalid FPR (negative)
         let features = SSTableFeatures {
-            lz: false,
-            fpr: -0.1,
+            item_count: 100,
+            fpr: 0.01,
         };
 
-        let result = SSTableBuilder::new(features, &file_path, 100);
+        let result = SSTableBuilder::new(features, &file_path);
         assert!(matches!(
             result,
             Err(SSTableError::InvalidFalsePositiveRate(_))
@@ -224,11 +221,11 @@ mod tests {
 
         // Test invalid FPR (> 1.0)
         let features = SSTableFeatures {
-            lz: false,
+            item_count: 100,
             fpr: 1.5,
         };
 
-        let result = SSTableBuilder::new(features, &file_path, 100);
+        let result = SSTableBuilder::new(features, &file_path);
         assert!(matches!(
             result,
             Err(SSTableError::InvalidFalsePositiveRate(_))
@@ -241,7 +238,7 @@ mod tests {
         let file_path = temp_dir.path().join("test.sst");
 
         let features = SSTableFeatures {
-            lz: false,
+            item_count: 100,
             fpr: 0.01,
         };
 
@@ -255,11 +252,11 @@ mod tests {
         let file_path = temp_dir.path().join("test.sst");
 
         let features = SSTableFeatures {
-            lz: false,
+            item_count: 100,
             fpr: 0.01,
         };
 
-        let mut builder = SSTableBuilder::new(features, &file_path, 100)?;
+        let mut builder = SSTableBuilder::new(features, &file_path)?;
 
         let kv = create_test_kv("test-key", "test-value");
         builder.add_from_kv(kv)?;
@@ -276,11 +273,11 @@ mod tests {
         let file_path = temp_dir.path().join("test.sst");
 
         let features = SSTableFeatures {
-            lz: false,
+            item_count: 100,
             fpr: 0.01,
         };
 
-        let mut builder = SSTableBuilder::new(features, &file_path, 100)?;
+        let mut builder = SSTableBuilder::new(features, &file_path)?;
 
         let kv = create_test_kv("", "test-value");
         let result = builder.add_from_kv(kv);
@@ -296,11 +293,11 @@ mod tests {
         let file_path = temp_dir.path().join("test.sst");
 
         let features = SSTableFeatures {
-            lz: false,
+            item_count: 100,
             fpr: 0.01,
         };
 
-        let mut builder = SSTableBuilder::new(features, &file_path, 1000)?;
+        let mut builder = SSTableBuilder::new(features, &file_path0)?;
 
         for i in 0..100 {
             let key = format!("key-{:05}", i);
@@ -319,11 +316,11 @@ mod tests {
         let file_path = temp_dir.path().join("test.sst");
 
         let features = SSTableFeatures {
-            lz: false,
+            item_count: 100,
             fpr: 0.01,
         };
 
-        let mut builder = SSTableBuilder::new(features, &file_path, 100)?;
+        let mut builder = SSTableBuilder::new(features, &file_path)?;
 
         // (RESTART_INTERVAL is 16 in the code)
         for i in 0..50 {
@@ -353,11 +350,11 @@ mod tests {
         let file_path = temp_dir.path().join("test.sst");
 
         let features = SSTableFeatures {
-            lz: false,
+            item_count: 100,
             fpr: 0.01,
         };
 
-        let mut builder = SSTableBuilder::new(features, &file_path, 1000)?;
+        let mut builder = SSTableBuilder::new(features, &file_path0)?;
 
         for i in 0..200 {
             let key = format!("key-{:05}", i);
@@ -377,11 +374,11 @@ mod tests {
         let file_path = temp_dir.path().join("test.sst");
 
         let features = SSTableFeatures {
-            lz: false,
+            item_count: 100,
             fpr: 0.01,
         };
 
-        let mut builder = SSTableBuilder::new(features, &file_path, 100)?;
+        let mut builder = SSTableBuilder::new(features, &file_path)?;
 
         for i in 0..100 {
             let key = format!("key-{:05}", i);
@@ -405,11 +402,11 @@ mod tests {
         let file_path = temp_dir.path().join("test.sst");
 
         let features = SSTableFeatures {
-            lz: false,
+            item_count: 100,
             fpr: 0.01,
         };
 
-        let mut builder = SSTableBuilder::new(features, &file_path, 100)?;
+        let mut builder = SSTableBuilder::new(features, &file_path)?;
 
         builder.add_from_kv(create_test_kv("user:1000:profile", "value1"))?;
         builder.add_from_kv(create_test_kv("user:1000:settings", "value2"))?;
@@ -428,11 +425,11 @@ mod tests {
         let file_path = temp_dir.path().join("test.sst");
 
         let features = SSTableFeatures {
-            lz: false,
+            item_count: 100,
             fpr: 0.01,
         };
 
-        let mut builder = SSTableBuilder::new(features, &file_path, 100)?;
+        let mut builder = SSTableBuilder::new(features, &file_path)?;
 
         assert_eq!(builder.entry_count(), 0);
         assert_eq!(builder.block_count(), 0);
