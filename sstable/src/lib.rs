@@ -7,6 +7,7 @@ use std::{
 };
 
 use block_iter::SSTableBlockIterator;
+use bloomfilter::Bloom;
 use chained_blocks::SSTableIterator;
 use error::SSTableError;
 use integer_encoding::VarIntReader;
@@ -26,6 +27,7 @@ pub struct SSTable {
     page_hash_indices: Vec<HashMap<String, usize>>, // One hash index per block
     fence_pointers: Vec<(Arc<str>, usize)>,
     restart_indices: Vec<Vec<usize>>, // Restart indices for each block
+    bloom_filter: Arc<Bloom<String>>
 }
 
 impl SSTable {

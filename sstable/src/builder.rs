@@ -1,4 +1,5 @@
 use crate::{error::SSTableError, SSTable};
+use bloomfilter::Bloom;
 use integer_encoding::VarInt;
 use key_value::{key_value_pair::DeltaEncodedKV, KeyValue};
 use std::{
@@ -30,23 +31,19 @@ pub struct SSTableBuilder {
     pub page_hash_indices: Vec<HashMap<String, usize>>, // One hash index per block
     pub current_offset: usize,            // File offset
     pub restart_indices: Vec<Vec<usize>>, // Restart indices for each block
+    pub filter: Option<Bloom<String>>
 }
 
 impl SSTableBuilder {
     pub fn new(
         features: SSTableFeatures,
         file_name: &Path,
-        all_items_len: usize,
+        all_items_len: usize
     ) -> Result<Self, SSTableError> {
-        //if all_items_len == 0 {
-         //   return Err(SSTableError::InvalidItemCount);
-        //}
-
-        //if features.fpr <= 0.0 || features.fpr >= 1.0 {
-         //   return Err(SSTableError::InvalidFalsePositiveRate(features.fpr));
-        //}
-
-        //  let filter = Bloom::new_for_fp_rate(all_items_len, features.fpr) .map_err(|e| SSTableError::BloomFilterError(e.to_string()))?;
+        if features.fpr <= 0.0 || features.fpr >= 1.0 {
+            return Err(SSTableError::InvalidFalsePositiveRate(features.fpr));
+        }
+          let filter = Bloom::new_for_fp_rate(all_items_len, features.fpr) .map_err(|e| SSTableError::BloomFilterError(e.to_string()))?;
 
         Ok(Self {
             features,
@@ -59,6 +56,7 @@ impl SSTableBuilder {
             page_hash_indices: Vec::new(),
             current_offset: 4, // "SSTB"
             restart_indices: Vec::new(),
+            filter: Some(filter)
         })
     }
 
@@ -66,6 +64,8 @@ impl SSTableBuilder {
         if key.key.is_empty() {
             return Err(SSTableError::EmptyKey);
         }
+        // bloom filter key set
+        self.filter.take().expect("Filter taken").set(&key.key);
 
         let tentative = DeltaEncodedKV::forward(self.last_key.clone(), key.clone());
         let entry_size = tentative.calculate_size();
@@ -130,16 +130,12 @@ impl SSTableBuilder {
             .write_all(b"SSTB")
             .map_err(SSTableError::FileSystemError)?;
 
-        let mut current_position = 4; // Start after header
-
         for block in self.blocks.iter() {
             for kv in block {
                 let kv_bytes = kv.to_str();
                 writer
                     .write_all(&kv_bytes)
                     .map_err(SSTableError::FileSystemError)?;
-
-                current_position += kv_bytes.len();
             }
         }
 
@@ -147,12 +143,14 @@ impl SSTableBuilder {
             .write_all(b"SSTB")
             .map_err(SSTableError::FileSystemError)?;
         writer.flush().map_err(SSTableError::FileSystemError)?;
+
         Ok(Arc::new(SSTable {
             file_path: self.file_name.clone(),
             fd: None,
             page_hash_indices: self.page_hash_indices.clone(),
             fence_pointers: self.fence_pointers.clone(),
             restart_indices: self.restart_indices.clone(),
+            bloom_filter: Arc::new(self.filter.take().expect("Filter taken"))
         }))
     }
 
