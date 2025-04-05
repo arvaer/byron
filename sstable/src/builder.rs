@@ -63,7 +63,9 @@ impl SSTableBuilder {
             return Err(SSTableError::EmptyKey);
         }
         // bloom filter key set
-        self.filter.take().expect("Filter taken").set(&key.key);
+        if let Some(ref mut filter) = self.filter {
+            filter.set(&key.key);
+        }
 
         let tentative = DeltaEncodedKV::forward(self.last_key.clone(), key.clone());
         let entry_size = tentative.calculate_size();

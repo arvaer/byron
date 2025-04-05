@@ -35,7 +35,7 @@ impl Drop for SSTable {
         if let Err(err) = self.delete() {
             eprintln!("Error deleting SSTable file {}: {:?}", self.file_path.display(), err);
         } else{
-           println!("Dropped sstable file {}", self.file_path.display())
+           log::info!("Dropped sstable file {}", self.file_path.display())
         }
     }
 }

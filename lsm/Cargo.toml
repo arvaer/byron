@@ -9,6 +9,8 @@ sstable = {path = "../sstable"}
 memtable = {path = "../memtable"}
 bloomfilter = "3"
 thiserror = "2.0.12"
+tempfile = "3.19.1"
+log = "0.4.27"
 
 [dependencies.uuid]
 version = "1.16.0"

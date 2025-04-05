@@ -2,6 +2,7 @@ use key_value::KeyValue;
 use memtable::{mem_table_builder::MemTableBuilder, MemTable, MemTableOperations};
 use sstable::{builder::SSTableFeatures, error::SSTableError, SSTable};
 use std::{mem, path::PathBuf, sync::Arc, thread};
+use crate::lsm_compaction::Monkey;
 
 use crate::{error::LsmError, lsm_operators::LsmSearchOperators};
 
@@ -79,23 +80,26 @@ impl LsmSearchOperators for LsmDatabase {
         if let Some(kv) = self.primary.get(&key) {
             return Ok(kv.into());
         }
-
-        for sstable in self.tables.iter() {
-            match sstable.get(key.clone()) {
-                Ok(kv) => return Ok(kv),
-                Err(SSTableError::KeyNotfound) => continue,
-                Err(e) => return Err(LsmError::SSTable(e)),
+        for level in self.levels.iter() {
+            for sstable in level.inner.iter() {
+                match sstable.get(key.clone()) {
+                    Ok(kv) => return Ok(kv),
+                    Err(SSTableError::KeyNotfound) => continue,
+                    Err(e) => return Err(LsmError::SSTable(e)),
+                }
             }
         }
+
         Err(LsmError::KeyNotFound)
     }
 
-    fn put(&mut self, key: String, value: String) {
+    fn put(&mut self, key: String, value: String)-> Result<(), LsmError> {
         self.primary.put(key, value);
         if self.primary.at_capacity() {
             let sstable = self.flash().join().expect("Flushing thread panicked");
-            self.tables.push(sstable);
+            let _ = self.insert_new_table(sstable, 1)?;
         }
+        Ok(())
     }
 
     fn range() {

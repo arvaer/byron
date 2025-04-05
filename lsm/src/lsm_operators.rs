@@ -6,6 +6,6 @@ use crate::error::LsmError;
 
 pub trait LsmSearchOperators {
     fn get(&self, key: String) -> Result<Arc<KeyValue>, LsmError>;
-    fn put(&mut self, key: String, value: String);
+    fn put(&mut self, key: String, value: String)-> Result<(), LsmError>;
     fn range();
 }
