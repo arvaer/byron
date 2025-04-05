@@ -1,6 +1,5 @@
 use crate::{error::SSTableError, SSTable};
 use bloomfilter::Bloom;
-use integer_encoding::VarInt;
 use key_value::{key_value_pair::DeltaEncodedKV, KeyValue};
 use std::{
     collections::HashMap,
@@ -149,7 +148,7 @@ impl SSTableBuilder {
             page_hash_indices: self.page_hash_indices.clone(),
             fence_pointers: self.fence_pointers.clone(),
             restart_indices: self.restart_indices.clone(),
-            bloom_filter: Arc::new(self.filter.take().expect("Filter taken")),
+            bloom_filter: Some(Arc::new(self.filter.take().expect("Filter taken"))),
             actual_item_count: self.entry_count
         }))
     }

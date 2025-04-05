@@ -1,16 +1,26 @@
 use key_value::KeyValue;
 use memtable::{mem_table_builder::MemTableBuilder, MemTable, MemTableOperations};
 use sstable::{builder::SSTableFeatures, error::SSTableError, SSTable};
-use std::{ collections::HashMap, mem, path::PathBuf, sync::Arc, thread};
+use std::{mem, path::PathBuf, sync::Arc, thread};
 
 use crate::{error::LsmError, lsm_operators::LsmSearchOperators};
+
+#[derive(Debug)]
+pub struct Level {
+    pub inner: Vec<Arc<SSTable>>,
+    pub depth: usize,
+    pub width: usize,
+    pub total_entries: usize
+}
 
 #[derive(Debug)]
 pub struct LsmDatabase {
     pub primary: MemTable,
     pub tables: Vec<Arc<SSTable>>,
-    pub capacity_expansion_factor: usize, //sshould be a whole number
+    pub capacity_expansion_factor: f64,
     pub parent_directory: PathBuf,
+    pub levels: Vec<Level>,
+    pub base_fpr: f64
 }
 
 impl Default for LsmDatabase {
@@ -19,18 +29,22 @@ impl Default for LsmDatabase {
             primary: MemTable::default(),
             tables: Vec::new(),
             parent_directory: PathBuf::from("./data"),
-            capacity_expansion_factor: 4,
+            capacity_expansion_factor: 1.618,
+            levels: Vec::new(),
+            base_fpr: 0.005
         }
     }
 }
 
 impl LsmDatabase {
-    pub fn new(parent_directory: String, capacity_expansion_factor: Option<usize>) -> Self {
+    pub fn new(parent_directory: String, capacity_expansion_factor: Option<f64>) -> Self {
         Self {
             primary: MemTableBuilder::default().max_entries(1000).build(),
             tables: Vec::new(),
             parent_directory: parent_directory.into(),
-            capacity_expansion_factor: capacity_expansion_factor.unwrap_or(4)
+            capacity_expansion_factor: capacity_expansion_factor.unwrap_or(1.618),
+            levels: Vec::new(),
+            base_fpr: 0.005
         }
     }
 
@@ -54,7 +68,7 @@ impl LsmDatabase {
 
     pub fn calculate_sstable_features(&self) -> SSTableFeatures {
         SSTableFeatures {
-            lz: false,
+            item_count: 1000,
             fpr: 0.01,
         }
     }

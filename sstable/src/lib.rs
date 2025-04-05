@@ -18,7 +18,6 @@ pub mod builder;
 pub mod streamed_builder;
 mod chained_blocks;
 pub mod error;
-mod operations;
 
 #[derive(Debug)]
 pub struct SSTable {
@@ -27,14 +26,31 @@ pub struct SSTable {
     page_hash_indices: Vec<HashMap<String, usize>>, // One hash index per block
     fence_pointers: Vec<(Arc<str>, usize)>,
     restart_indices: Vec<Vec<usize>>, // Restart indices for each block
-    bloom_filter: Arc<Bloom<String>>,
-    actual_item_count: usize
+    bloom_filter: Option<Arc<Bloom<String>>>,
+    pub actual_item_count: usize
 }
 
+impl Drop for SSTable {
+    fn drop(&mut self) {
+        if let Err(err) = self.delete() {
+            eprintln!("Error deleting SSTable file {}: {:?}", self.file_path.display(), err);
+        } else{
+           println!("Dropped sstable file {}", self.file_path.display())
+        }
+    }
+}
+
+
 impl SSTable {
+    pub fn delete(&mut self)->Result<(), SSTableError> {
+        std::fs::remove_file(&self.file_path)?;
+        Ok(())
+    }
     pub fn get(&self, key: String) -> Result<Arc<KeyValue>, SSTableError> {
-        if !self.bloom_filter.check(&key) {
-            return Err(SSTableError::KeyNotfound);
+        if let Some(filter) = &self.bloom_filter {
+            if !filter.check(&key) {
+                return Err(SSTableError::KeyNotfound);
+            }
         }
 
         let block_idx = self

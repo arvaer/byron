@@ -1,6 +1,5 @@
 use crate::{builder::SSTableFeatures, error::SSTableError, SSTable};
 use bloomfilter::Bloom;
-use integer_encoding::VarInt;
 use key_value::{key_value_pair::DeltaEncodedKV, KeyValue};
 use std::{
     collections::HashMap,
@@ -26,12 +25,13 @@ pub struct StreamedSSTableBuilder {
     pub current_offset: usize,                          // File offset
     pub restart_indices: Vec<Vec<usize>>,               // Restart indices for each block
     pub entry_count: usize,
-    pub filter: Bloom<String>,
+    pub filter: Option<Bloom<String>>,
 }
 
 impl StreamedSSTableBuilder {
     pub fn new(
         SSTableFeatures { item_count, fpr }: SSTableFeatures,
+        filtered: bool,
         file_name: &Path,
     ) -> Result<Self, SSTableError> {
         if let Some(parent) = file_name.parent() {
@@ -46,8 +46,13 @@ impl StreamedSSTableBuilder {
             return Err(SSTableError::InvalidFalsePositiveRate(fpr));
         }
 
-        let filter = Bloom::new_for_fp_rate(item_count, fpr)
-            .map_err(|e| SSTableError::BloomFilterError(e.to_string()))?;
+        let filter: Option<Bloom<String>> = match filtered {
+            true => Some(
+                Bloom::new_for_fp_rate(item_count, fpr)
+                    .map_err(|e| SSTableError::BloomFilterError(e.to_string()))?,
+            ),
+            false => None,
+        };
 
         Ok(Self {
             fence_pointers: Vec::new(),
@@ -69,7 +74,9 @@ impl StreamedSSTableBuilder {
         if key.key.is_empty() {
             return Err(SSTableError::EmptyKey);
         }
-        self.filter.set(&key.key);
+        if let Some(ref mut filter) = self.filter{
+            filter.set(&key.key);
+        }
 
         let tentative = DeltaEncodedKV::forward(self.last_key.clone(), key.clone());
         let entry_size = tentative.calculate_size();
@@ -146,8 +153,11 @@ impl StreamedSSTableBuilder {
             page_hash_indices: self.page_hash_indices.clone(),
             fence_pointers: self.fence_pointers.clone(),
             restart_indices: self.restart_indices.clone(),
-            bloom_filter: Arc::new(self.filter),
-            actual_item_count: self.entry_count
+            bloom_filter: match self.filter {
+                Some(filt) => Some(Arc::from(filt)),
+                None => None,
+            },
+            actual_item_count: self.entry_count,
         }))
     }
 }
@@ -175,7 +185,7 @@ mod tests {
             fpr: 0.01,
         };
 
-        let builder = StreamedSSTableBuilder::new(features, &fp)?;
+        let builder = StreamedSSTableBuilder::new(features, true, &fp)?;
         assert_eq!(builder.entry_count, 0);
         assert_eq!(builder.block_idx, 0);
         assert!(builder.fence_pointers.is_empty());
@@ -191,7 +201,7 @@ mod tests {
             fpr: 0.01,
         };
 
-        let builder = StreamedSSTableBuilder::new(features, &fp)?;
+        let builder = StreamedSSTableBuilder::new(features, true, &fp)?;
         let kv = create_test_kv("test-key", "test-value");
         builder.add_from_kv(kv)?;
 
@@ -210,7 +220,7 @@ mod tests {
             fpr: 0.01,
         };
 
-        let mut builder = StreamedSSTableBuilder::new(features, &fp)?;
+        let mut builder = StreamedSSTableBuilder::new(features, true, &fp)?;
 
         let kv = create_test_kv("", "test-value");
         let result = builder.add_from_kv(kv);
@@ -229,7 +239,7 @@ mod tests {
             fpr: 0.01,
         };
 
-        let mut builder = StreamedSSTableBuilder::new(features, &fp)?;
+        let mut builder = StreamedSSTableBuilder::new(features, true, &fp)?;
 
         for i in 0..100 {
             let key = format!("key-{:05}", i);
@@ -253,7 +263,7 @@ mod tests {
             fpr: 0.01,
         };
 
-        let mut builder = StreamedSSTableBuilder::new(features, &fp)?;
+        let mut builder = StreamedSSTableBuilder::new(features, true, &fp)?;
 
         for i in 0..50 {
             let key = format!("key-{:05}", i);
@@ -285,7 +295,7 @@ mod tests {
             fpr: 0.01,
         };
 
-        let mut builder = StreamedSSTableBuilder::new(features, &fp)?;
+        let mut builder = StreamedSSTableBuilder::new(features, true, &fp)?;
 
         for i in 0..200 {
             let key = format!("key-{:05}", i);
@@ -306,7 +316,7 @@ mod tests {
             fpr: 0.01,
         };
 
-        let mut builder = StreamedSSTableBuilder::new(features, &fp)?;
+        let mut builder = StreamedSSTableBuilder::new(features, true, &fp)?;
 
         for i in 0..200 {
             let key = format!("key-{:05}", i);
@@ -333,7 +343,7 @@ mod tests {
             fpr: 0.01,
         };
 
-        let mut builder = StreamedSSTableBuilder::new(features, &fp)?;
+        let mut builder = StreamedSSTableBuilder::new(features, true, &fp)?;
 
         builder.add_from_kv(create_test_kv("user:1000:profile", "value1"))?;
         builder.add_from_kv(create_test_kv("user:1000:settings", "value2"))?;
@@ -356,7 +366,7 @@ mod tests {
             fpr: 0.01,
         };
 
-        let mut builder = StreamedSSTableBuilder::new(features, &fp)?;
+        let mut builder = StreamedSSTableBuilder::new(features, true, &fp)?;
         assert_eq!(builder.entry_count, 0);
         assert_eq!(builder.block_idx, 0);
 

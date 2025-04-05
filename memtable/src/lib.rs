@@ -34,30 +34,26 @@ impl MemTableOperations for MemTable {
     fn put(&mut self, key: String, value: String) {
         match &mut self.inner {
             //take exclusive reference to self.inner
-            DataStructure::Vector(memtable) => memtable.put(key, value),
-            _ => unimplemented!(),
+            DataStructure::Vector(memtable) => memtable.put(key, value)
         }
     }
 
     fn get(&self, key: &str) -> Option<Box<KeyValue>> {
         match &self.inner {
             //shared reference
-            DataStructure::Vector(memtable) => memtable.get(key),
-            _ => unimplemented!(),
+            DataStructure::Vector(memtable) => memtable.get(key)
         }
     }
 
     fn at_capacity(&self) -> bool {
         match &self.inner {
-            DataStructure::Vector(memtable) => memtable.at_capacity(),
-            _ => unimplemented!(),
+            DataStructure::Vector(memtable) => memtable.at_capacity()
         }
     }
 
     fn flush( &mut self, path: PathBuf, table_params: SSTableFeatures,) -> Result<Arc<SSTable>, crate::error::MemTableError>{
         match &mut self.inner {
-            DataStructure::Vector(memtable) => memtable.flush(path, table_params),
-            _ => unimplemented!(),
+            DataStructure::Vector(memtable) => memtable.flush(path, table_params)
         }
     }
 }

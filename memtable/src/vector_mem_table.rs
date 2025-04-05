@@ -5,7 +5,7 @@ use sstable::{
 };
 use std::{path::PathBuf, sync::Arc};
 
-use crate::{error::MemTableError, MemTableOperations};
+use crate::MemTableOperations;
 
 #[derive(Debug, Default)]
 pub struct VectorMemTable {
@@ -46,7 +46,7 @@ impl MemTableOperations for VectorMemTable {
         path: PathBuf,
         table_params: SSTableFeatures,
     ) -> Result<Arc<SSTable>, crate::error::MemTableError> {
-        let mut builder = SSTableBuilder::new(table_params, &path, 1000)?;
+        let mut builder = SSTableBuilder::new(table_params, &path)?;
         self.data.sort();
         for i in &self.data{
             let _ = builder.add_from_kv(i.clone());
