@@ -11,6 +11,7 @@ pub trait MemTableOperations {
     fn put(&mut self, key: String, value: String);
     fn get(&self, key: &str) -> Option<Box<KeyValue>>;
     fn at_capacity(&self) -> bool;
+    fn current_length(&self) -> usize;
     fn flush( &mut self, path: PathBuf, table_params: SSTableFeatures,) -> Result<Arc<SSTable>, crate::error::MemTableError>;
 }
 
@@ -31,6 +32,7 @@ pub struct MemTable {
 }
 
 impl MemTableOperations for MemTable {
+
     fn put(&mut self, key: String, value: String) {
         match &mut self.inner {
             //take exclusive reference to self.inner
@@ -48,6 +50,12 @@ impl MemTableOperations for MemTable {
     fn at_capacity(&self) -> bool {
         match &self.inner {
             DataStructure::Vector(memtable) => memtable.at_capacity()
+        }
+    }
+
+    fn current_length(&self) -> usize {
+        match &self.inner {
+            DataStructure::Vector(memtable) => memtable.current_length()
         }
     }
 

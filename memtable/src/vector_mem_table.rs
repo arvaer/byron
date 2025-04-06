@@ -3,6 +3,7 @@ use sstable::{
     builder::{SSTableBuilder, SSTableFeatures},
     SSTable,
 };
+use std::collections::BTreeMap;
 use std::{path::PathBuf, sync::Arc};
 
 use crate::MemTableOperations;
@@ -24,9 +25,6 @@ impl VectorMemTable {
 
 impl MemTableOperations for VectorMemTable {
     fn put(&mut self, key: String, value: String) {
-        if let Some(index) = self.data.iter().position(|item| item.key == key) {
-            self.data.remove(index);
-        }
         self.data.push(KeyValue { key, value })
     }
 
@@ -41,18 +39,26 @@ impl MemTableOperations for VectorMemTable {
         self.data.len() >= self.max_entries
     }
 
+    fn current_length(&self) -> usize {
+        self.data.len()
+    }
+
     fn flush(
         &mut self,
         path: PathBuf,
         table_params: SSTableFeatures,
     ) -> Result<Arc<SSTable>, crate::error::MemTableError> {
         let mut builder = SSTableBuilder::new(table_params, &path)?;
-        self.data.sort();
-        for i in &self.data{
-            let _ = builder.add_from_kv(i.clone());
-        }
-        let builder = builder.build()?;
-        Ok(builder)
 
+        let mut deduped: BTreeMap<String, KeyValue> = BTreeMap::new();
+        for kv in &self.data {
+            deduped.insert(kv.key.clone(), kv.clone());
+        }
+
+        for (_key, kv) in deduped {
+            builder.add_from_kv(kv)?;
+        }
+        let table = builder.build()?;
+        Ok(table)
     }
 }
