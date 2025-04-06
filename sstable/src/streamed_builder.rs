@@ -6,7 +6,7 @@ use std::{
     fs::{self, File},
     io::{BufWriter, Write},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 const BLOCK_SIZE: usize = 4096; // 4KB block size
@@ -158,6 +158,7 @@ impl StreamedSSTableBuilder {
                 None => None,
             },
             actual_item_count: self.entry_count,
+            deleted: Mutex::new(false)
         }))
     }
 }
@@ -196,12 +197,13 @@ mod tests {
     #[test]
     fn test_add_single_key() -> Result<(), SSTableError> {
         let temp_dir = tempdir().unwrap();
+        let fp = temp_dir.path().join("test.sst");
         let features = SSTableFeatures {
             item_count: 100,
             fpr: 0.01,
         };
 
-        let builder = StreamedSSTableBuilder::new(features, true, &fp)?;
+        let mut builder = StreamedSSTableBuilder::new(features, true, &fp)?;
         let kv = create_test_kv("test-key", "test-value");
         builder.add_from_kv(kv)?;
 

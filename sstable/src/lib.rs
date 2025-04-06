@@ -3,7 +3,7 @@ use std::{
     fs::File,
     io::{BufReader, Cursor, Read, Seek, SeekFrom},
     path::PathBuf,
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 use block_iter::SSTableBlockIterator;
@@ -15,9 +15,9 @@ use key_value::{key_value_pair::DeltaEncodedKV, KeyValue};
 
 mod block_iter;
 pub mod builder;
-pub mod streamed_builder;
 mod chained_blocks;
 pub mod error;
+pub mod streamed_builder;
 
 #[derive(Debug)]
 pub struct SSTable {
@@ -27,24 +27,33 @@ pub struct SSTable {
     fence_pointers: Vec<(Arc<str>, usize)>,
     restart_indices: Vec<Vec<usize>>, // Restart indices for each block
     bloom_filter: Option<Arc<Bloom<String>>>,
-    pub actual_item_count: usize
+    pub actual_item_count: usize,
+    deleted: Mutex<bool>,
 }
-
-impl Drop for SSTable {
-    fn drop(&mut self) {
-        if let Err(err) = self.delete() {
-            eprintln!("Error deleting SSTable file {}: {:?}", self.file_path.display(), err);
-        } else{
-           log::info!("Dropped sstable file {}", self.file_path.display())
-        }
-    }
-}
-
 
 impl SSTable {
-    pub fn delete(&mut self)->Result<(), SSTableError> {
-        std::fs::remove_file(&self.file_path)?;
-        Ok(())
+    pub fn delete(&self) -> Result<(), SSTableError> {
+        let mut deleted = self.deleted.lock().unwrap();
+        if *deleted {
+            // Already deleted, avoid trying again
+            return Ok(());
+        }
+
+        println!("Dropping sstable file {}", self.file_path.display());
+        match std::fs::remove_file(&self.file_path) {
+            Ok(_) => {
+                *deleted = true;
+                Ok(())
+            }
+            Err(e) => {
+                eprintln!(
+                    "Error deleting sstable file {}: {}",
+                    self.file_path.display(),
+                    e
+                );
+                Err(SSTableError::FileSystemError(e))
+            }
+        }
     }
     pub fn get(&self, key: String) -> Result<Arc<KeyValue>, SSTableError> {
         if let Some(filter) = &self.bloom_filter {
@@ -499,7 +508,7 @@ impl SSTable {
     }
 }
 
-impl <'a> IntoIterator for &'a SSTable {
+impl<'a> IntoIterator for &'a SSTable {
     type Item = Result<KeyValue, SSTableError>;
     type IntoIter = SSTableIterator<'a>;
     fn into_iter(self) -> Self::IntoIter {
@@ -534,6 +543,10 @@ mod tests {
                 page_hash_indices: Vec::new(),
                 fence_pointers,
                 restart_indices: Vec::new(),
+                bloom_filter: None,
+                actual_item_count: 0,
+                deleted: Mutex::new(false)
+
             }
         }
     }
@@ -703,12 +716,12 @@ mod tests {
         log::info!("Using file path: {:?}", file_path);
 
         let features = SSTableFeatures {
-            lz: false,
             fpr: 0.01,
+            item_count: 1000
         };
 
         log::info!("Creating SSTableBuilder...");
-        let mut builder = SSTableBuilder::new(features, &file_path, 100)?;
+        let mut builder = SSTableBuilder::new(features, &file_path)?;
 
         let test_key = "test-key-42";
         let test_value = "test-value-42";
@@ -775,7 +788,7 @@ mod tests {
             Err(e) => log::info!("error reading block: {:?}", e),
         }
 
-        let block_data = block_data_result?;
+        let _ = block_data_result?;
 
         log::info!("checking restart indices for block {}...", block_idx.0);
         if block_idx.0 < sstable.restart_indices.len() {
@@ -821,11 +834,11 @@ mod tests {
         let file_path = temp_dir.path().join("test.sst");
 
         let features = SSTableFeatures {
-            lz: false,
+            item_count:1000,
             fpr: 0.01,
         };
 
-        let mut builder = SSTableBuilder::new(features, &file_path, 100)?;
+        let mut builder = SSTableBuilder::new(features, &file_path)?;
 
         for i in 0..100 {
             let key = format!("key-{:05}", i);
@@ -848,11 +861,11 @@ mod tests {
         let file_path = temp_dir.path().join("test.sst");
 
         let features = SSTableFeatures {
-            lz: false,
+            item_count:1000,
             fpr: 0.01,
         };
 
-        let mut builder = SSTableBuilder::new(features, &file_path, 1000)?;
+        let mut builder = SSTableBuilder::new(features, &file_path)?;
 
         for i in 0..250 {
             let key = format!("key-{:05}", i);
@@ -883,11 +896,11 @@ mod tests {
         let file_path = temp_dir.path().join("test.sst");
 
         let features = SSTableFeatures {
-            lz: false,
+            item_count:1000,
             fpr: 0.01,
         };
 
-        let mut builder = SSTableBuilder::new(features, &file_path, 1000)?;
+        let mut builder = SSTableBuilder::new(features, &file_path)?;
 
         for i in 0..500 {
             let key = format!("key-{:05}", i);
@@ -914,11 +927,11 @@ mod tests {
         let file_path = temp_dir.path().join("test.sst");
 
         let features = SSTableFeatures {
-            lz: false,
+            item_count:1000,
             fpr: 0.01,
         };
 
-        let mut builder = SSTableBuilder::new(features, &file_path, 1000)?;
+        let mut builder = SSTableBuilder::new(features, &file_path)?;
 
         // add keys that force block boundaries
         for i in 0..150 {
@@ -927,15 +940,7 @@ mod tests {
             builder.add_from_kv(create_test_kv(&key, &value))?;
         }
 
-        builder.build()?;
-
-        let sstable = SSTable {
-            file_path: file_path.clone(),
-            fd: None,
-            page_hash_indices: builder.page_hash_indices.clone(),
-            fence_pointers: builder.fence_pointers.clone(),
-            restart_indices: builder.restart_indices.clone(),
-        };
+        let sstable = builder.build()?;
 
         for i in (0..150).step_by(50) {
             let key = format!("key-{:05}", i);
@@ -957,25 +962,17 @@ mod tests {
         let file_path = temp_dir.path().join("test.sst");
 
         let features = SSTableFeatures {
-            lz: false,
+            item_count:1000,
             fpr: 0.01,
         };
 
-        let mut builder = SSTableBuilder::new(features, &file_path, 100)?;
+        let mut builder = SSTableBuilder::new(features, &file_path)?;
         for i in 0..50 {
             let key = format!("key-{:05}", i);
             builder.add_from_kv(create_test_kv(&key, &format!("value-{}", i)))?;
         }
 
-        builder.build()?;
-
-        let sstable = SSTable {
-            file_path: file_path.clone(),
-            fd: None, // Testing with closed file
-            page_hash_indices: builder.page_hash_indices.clone(),
-            fence_pointers: builder.fence_pointers.clone(),
-            restart_indices: builder.restart_indices.clone(),
-        };
+        let sstable = builder.build()?;
 
         if !sstable.fence_pointers.is_empty() {
             let block_offset = (0, 1); // First block
@@ -992,11 +989,11 @@ mod tests {
         let file_path = temp_dir.path().join("test.sst");
 
         let features = SSTableFeatures {
-            lz: false,
+            item_count: 1000,
             fpr: 0.01,
         };
 
-        let mut builder = SSTableBuilder::new(features, &file_path, 1000)?;
+        let mut builder = SSTableBuilder::new(features, &file_path)?;
 
         for i in 0..200 {
             let key = format!("key-{:05}", i);
@@ -1036,11 +1033,11 @@ mod tests {
         let file_path = temp_dir.path().join("test.sst");
 
         let features = SSTableFeatures {
-            lz: false,
+            item_count: 1000,
             fpr: 0.01,
         };
 
-        let mut builder = SSTableBuilder::new(features, &file_path, 100)?;
+        let mut builder = SSTableBuilder::new(features, &file_path)?;
 
         let large_value = "x".repeat(1_000_000); // 1MB value
         builder.add_from_kv(create_test_kv("large-key", &large_value))?;
@@ -1058,11 +1055,11 @@ mod tests {
         let file_path = temp_dir.path().join("test.sst");
 
         let features = SSTableFeatures {
-            lz: false,
             fpr: 0.01,
+            item_count: 1000
         };
 
-        let mut builder = SSTableBuilder::new(features, &file_path, 1000)?;
+        let mut builder = SSTableBuilder::new(features, &file_path)?;
 
         // Add keys with high-cardinality prefixes to test delta encoding
         for i in 0..100 {
@@ -1089,11 +1086,11 @@ mod tests {
         let file_path = temp_dir.path().join("test.sst");
 
         let features = SSTableFeatures {
-            lz: false,
             fpr: 0.01,
+            item_count:100
         };
 
-        let mut builder = SSTableBuilder::new(features, &file_path, 100)?;
+        let mut builder = SSTableBuilder::new(features, &file_path)?;
         let mut keys = Vec::new();
         for i in (0..50).rev() {
             let key = format!("key-{:05}", i);

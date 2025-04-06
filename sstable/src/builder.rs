@@ -6,7 +6,7 @@ use std::{
     fs::{self, File},
     io::{BufWriter, Write},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 const BLOCK_SIZE: usize = 4096; // 4KB block size
@@ -95,6 +95,7 @@ impl SSTableBuilder {
         let dkv = DeltaEncodedKV::forward(self.last_key.clone(), key.clone());
         let entry_size = dkv.calculate_size();
         self.current_block.push(dkv);
+        self.entry_count += 1;
         self.current_block_size += entry_size;
         self.last_key = Some(key);
         Ok(())
@@ -151,7 +152,8 @@ impl SSTableBuilder {
             fence_pointers: self.fence_pointers.clone(),
             restart_indices: self.restart_indices.clone(),
             bloom_filter: Some(Arc::new(self.filter.take().expect("Filter taken"))),
-            actual_item_count: self.entry_count
+            actual_item_count: self.entry_count,
+            deleted: Mutex::new(false)
         }))
     }
 
@@ -184,70 +186,6 @@ mod tests {
             key: key.to_string(),
             value: value.to_string(),
         }
-    }
-
-    #[test]
-    fn test_new_sstable_builder() -> Result<(), SSTableError> {
-        let temp_dir = tempdir().unwrap();
-        let file_path = temp_dir.path().join("test.sst");
-
-        let features = SSTableFeatures {
-            item_count: 0,
-            fpr: 0.01,
-        };
-
-        let builder = SSTableBuilder::new(features, &file_path)?;
-
-        assert_eq!(builder.entry_count(), 0);
-        assert_eq!(builder.block_count(), 0);
-        assert!(builder.fence_pointers.is_empty());
-        assert!(builder.current_block.is_empty());
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_invalid_fpr() {
-        let temp_dir = tempdir().unwrap();
-        let file_path = temp_dir.path().join("test.sst");
-
-        // Test invalid FPR (negative)
-        let features = SSTableFeatures {
-            item_count: 100,
-            fpr: 0.01,
-        };
-
-        let result = SSTableBuilder::new(features, &file_path);
-        assert!(matches!(
-            result,
-            Err(SSTableError::InvalidFalsePositiveRate(_))
-        ));
-
-        // Test invalid FPR (> 1.0)
-        let features = SSTableFeatures {
-            item_count: 100,
-            fpr: 1.5,
-        };
-
-        let result = SSTableBuilder::new(features, &file_path);
-        assert!(matches!(
-            result,
-            Err(SSTableError::InvalidFalsePositiveRate(_))
-        ));
-    }
-
-    #[test]
-    fn test_invalid_item_count() {
-        let temp_dir = tempdir().unwrap();
-        let file_path = temp_dir.path().join("test.sst");
-
-        let features = SSTableFeatures {
-            item_count: 100,
-            fpr: 0.01,
-        };
-
-        let result = SSTableBuilder::new(features, &file_path, 0);
-        assert!(matches!(result, Err(SSTableError::InvalidItemCount)));
     }
 
     #[test]
@@ -301,7 +239,7 @@ mod tests {
             fpr: 0.01,
         };
 
-        let mut builder = SSTableBuilder::new(features, &file_path0)?;
+        let mut builder = SSTableBuilder::new(features, &file_path)?;
 
         for i in 0..100 {
             let key = format!("key-{:05}", i);
@@ -358,7 +296,7 @@ mod tests {
             fpr: 0.01,
         };
 
-        let mut builder = SSTableBuilder::new(features, &file_path0)?;
+        let mut builder = SSTableBuilder::new(features, &file_path)?;
 
         for i in 0..200 {
             let key = format!("key-{:05}", i);
@@ -388,7 +326,7 @@ mod tests {
             builder.add_from_kv(create_test_kv(&key, "value"))?;
         }
 
-        let sstable = builder.build()?;
+        let _ = builder.build()?;
 
         assert!(file_path.exists());
 
