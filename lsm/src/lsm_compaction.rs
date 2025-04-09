@@ -96,9 +96,9 @@ impl Monkey for LsmDatabase {
             }
         }
 
+        let level = &mut self.levels[level_number];
         log::info!("Step 3: Adding table to level {}", level_number);
-        {
-            let level = &mut self.levels[level_number];
+        move  || {
             level.inner.push(incoming_table.clone());
             level.total_entries += incoming_table.actual_item_count;
             log::info!(
@@ -109,94 +109,16 @@ impl Monkey for LsmDatabase {
             );
         }
 
-        let needs_compaction = {
-            let level = &self.levels[level_number];
+        let needs_compaction = move || {
             let will_compact = level.inner.len() >= level.width;
             log::info!("Step 4: Checking compaction for level {}: {} tables (width {}), compaction needed: {}",
                  level_number, level.inner.len(), level.width, will_compact);
             will_compact
         };
 
-        if needs_compaction {
-            log::info!("Step 5: Starting compaction for level {}", level_number);
-            let file_name = self
-                .parent_directory
-                .join(format!("sstable-id-{}", Uuid::new_v4()));
-            let fpr = self.levels[level_number].width as f64 * self.base_fpr;
-            let total_entries = self.levels[level_number].total_entries;
-            log::info!(
-                "Step 5.1: Creating new table with fpr {} and {} entries",
-                fpr, total_entries
-            );
-
-            let features = SSTableFeatures {
-                fpr,
-                item_count: total_entries,
-            };
-            let mut min_heap = BinaryHeap::new();
-            let mut iterators: Vec<_> = self.levels[level_number]
-                .inner
-                .iter()
-                .map(|table| table.iter())
-                .collect();
-
-            for (sstable_idx, iter) in iterators.iter_mut().enumerate() {
-                if let Some(kv_result) = iter.next() {
-                    let key_value = kv_result?;
-                    min_heap.push(HeapItem {
-                        key_value,
-                        sstable_idx,
-                    });
-                }
-            }
-            log::info!(
-                "Step 5.2: Initialized min heap with {} items",
-                min_heap.len()
-            );
-
-            let mut new_table =
-                StreamedSSTableBuilder::new(features, !final_level_flag, &file_name)?;
-            let mut items_processed = 0;
-            while let Some(HeapItem {
-                key_value,
-                sstable_idx,
-            }) = min_heap.pop()
-            {
-                let _ = new_table.add_from_kv(key_value);
-                items_processed += 1;
-                if let Some(next_kv_result) = iterators[sstable_idx].next() {
-                    let next_kv = next_kv_result?;
-                    min_heap.push(HeapItem {
-                        key_value: next_kv,
-                        sstable_idx,
-                    });
-                }
-            }
-            log::info!(
-                "Step 5.3: Processed {} items during compaction",
-                items_processed
-            );
-
-            let compacted_table = new_table.finalize()?;
-            log::info!(
-                "Step 5.4: Finalized new table with {} entries",
-                compacted_table.actual_item_count
-            );
-
-            for table in self.levels[level_number].inner.iter() {
-                table.delete()?;
-            }
-            self.levels[level_number].inner.clear();
-            log::info!("Step 5.5: Cleared level {}", level_number);
-
-            log::info!(
-                "Step 5.6: Recursively inserting compacted table into level {}",
-                level_number + 1
-            );
-            self.insert_new_table(compacted_table, level_number + 1)?;
+        self.insert_new_table(compacted_table, level_number + 1)?;
         }
 
-        log::info!("Step 6: Insertion complete for level {}", level_number);
         Ok(())
     }
 }

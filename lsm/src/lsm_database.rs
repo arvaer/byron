@@ -1,9 +1,10 @@
+use crate::lsm_compaction::Monkey;
+use crate::wall_e::Walle;
 use key_value::KeyValue;
 use memtable::{mem_table_builder::MemTableBuilder, MemTable, MemTableOperations};
 use sstable::{builder::SSTableFeatures, error::SSTableError, SSTable};
-use uuid::Uuid;
 use std::{mem, path::PathBuf, sync::Arc, thread};
-use crate::lsm_compaction::Monkey;
+use uuid::Uuid;
 
 use crate::{error::LsmError, lsm_operators::LsmSearchOperators};
 
@@ -12,7 +13,7 @@ pub struct Level {
     pub inner: Vec<Arc<SSTable>>,
     pub depth: usize,
     pub width: usize,
-    pub total_entries: usize
+    pub total_entries: usize,
 }
 
 #[derive(Debug)]
@@ -22,7 +23,8 @@ pub struct LsmDatabase {
     pub capacity_expansion_factor: f64,
     pub parent_directory: PathBuf,
     pub levels: Vec<Level>,
-    pub base_fpr: f64
+    pub base_fpr: f64,
+    compaction_manager: Walle,
 }
 
 impl Default for LsmDatabase {
@@ -33,7 +35,8 @@ impl Default for LsmDatabase {
             parent_directory: PathBuf::from("./data"),
             capacity_expansion_factor: 1.618,
             levels: Vec::new(),
-            base_fpr: 0.005
+            base_fpr: 0.005,
+            compaction_manager: Walle::new(),
         }
     }
 }
@@ -44,7 +47,7 @@ impl LsmDatabase {
             inner: Vec::new(),
             depth: 0,
             width: 2,
-            total_entries: 0
+            total_entries: 0,
         };
         Self {
             primary: MemTableBuilder::default().max_entries(1000).build(),
@@ -52,7 +55,7 @@ impl LsmDatabase {
             parent_directory: parent_directory.into(),
             capacity_expansion_factor: capacity_expansion_factor.unwrap_or(1.618),
             levels: vec![first_level],
-            base_fpr: 0.005
+            base_fpr: 0.005,
         }
     }
 
@@ -63,7 +66,6 @@ impl LsmDatabase {
         );
 
         let parent_directory = self.parent_directory.clone();
-        let tables_len = self.tables.len();
         let features = self.calculate_sstable_features(old_table.current_length());
 
         thread::spawn(move || {
@@ -100,7 +102,7 @@ impl LsmSearchOperators for LsmDatabase {
         Err(LsmError::KeyNotFound)
     }
 
-    fn put(&mut self, key: String, value: String)-> Result<(), LsmError> {
+    fn put(&mut self, key: String, value: String) -> Result<(), LsmError> {
         self.primary.put(key, value);
         if self.primary.at_capacity() {
             let sstable = self.flash().join().expect("Flushing thread panicked");
@@ -120,7 +122,6 @@ mod lsm_database_tests {
     use super::*;
     use memtable::MemTableOperations;
     use tempfile::tempdir;
-
 
     fn create_test_db() -> (LsmDatabase, tempfile::TempDir) {
         let temp_dir = tempdir().unwrap();
@@ -154,7 +155,8 @@ mod lsm_database_tests {
             db.put(key, value).unwrap();
         }
 
-        assert!(!db.levels[0].inner.is_empty() || !db.levels[1].inner.is_empty()); // SSTable should be in level 0 or 1
+        assert!(!db.levels[0].inner.is_empty() || !db.levels[1].inner.is_empty());
+        // SSTable should be in level 0 or 1
     }
 
     #[test]
@@ -185,7 +187,11 @@ mod lsm_database_tests {
         }
 
         // Verify that we have at least 3 levels
-        assert!(db.levels.len() >= 3, "Expected at least 3 levels, got {}", db.levels.len());
+        assert!(
+            db.levels.len() >= 3,
+            "Expected at least 3 levels, got {}",
+            db.levels.len()
+        );
 
         // Check if we can still retrieve all keys after multi-level compaction
         for i in 0..100 {
@@ -266,7 +272,6 @@ mod lsm_database_tests {
         }
     }
 
-
     #[test]
     fn test_lookup_nonexistent_key() {
         let (mut db, _temp_dir) = create_test_db();
@@ -284,10 +289,9 @@ mod lsm_database_tests {
 
         if let Err(err) = result {
             match err {
-                LsmError::KeyNotFound => { /* expected error */ },
+                LsmError::KeyNotFound => { /* expected error */ }
                 _ => panic!("Expected KeyNotFound error, got: {:?}", err),
             }
         }
     }
-
 }
