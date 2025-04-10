@@ -16,7 +16,7 @@ impl Default for MemTableBuilder {
     fn default() -> Self {
         Self {
             memtable_type: MemTableType::Vector,
-            max_entries: 1000,
+            max_entries: 10,
         }
     }
 }

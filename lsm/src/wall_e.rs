@@ -11,7 +11,8 @@ use uuid::Uuid;
 
 use crate::{error::LsmError, lsm_database::Level};
 
-enum CompactionTask {
+#[derive(Debug)]
+pub enum CompactionTask {
     CompactLevel {
         level: Level,
         base_fpr: f64,
@@ -21,7 +22,8 @@ enum CompactionTask {
     PowerOff,
 }
 
-enum CompactionResult {
+#[derive(Debug)]
+pub enum CompactionResult {
     Completed {
         compacted_table: Arc<SSTable>,
         original_level: usize,
@@ -29,6 +31,7 @@ enum CompactionResult {
     },
     Failed {
         error_value: LsmError,
+        original_level: usize,
     },
 }
 
@@ -36,23 +39,68 @@ enum CompactionResult {
 pub struct Walle {
     pub sender: mpsc::Sender<CompactionTask>,
     pub receiver: mpsc::Receiver<CompactionResult>,
-    compaction_loop: JoinHandle<()>,
+    compaction_loop: Option<JoinHandle<Result<(), LsmError>>>,
 }
 
-impl Walle {
-    pub fn new() -> Self {
-        let (task_sender, task_receiver) = channel::<CompactionTask>(0);
-        let (result_sender, result_receiver) = channel::<CompactionResult>(0);
+impl Default for Walle {
+    fn default() -> Self {
+        let (task_sender, task_receiver) = channel::<CompactionTask>(32);
+        let (result_sender, result_receiver) = channel::<CompactionResult>(32);
 
-        let compaction_loop = task::spawn(async move {
-            let _ = Self::compact_loop(task_receiver, result_sender).await;
-        });
+        let compaction_loop =
+            tokio::spawn(async move { Self::compact_loop(task_receiver, result_sender).await });
 
         Self {
             sender: task_sender,
             receiver: result_receiver,
-            compaction_loop,
+            compaction_loop: Some(compaction_loop),
         }
+    }
+}
+
+impl Walle {
+    pub fn new() -> Self {
+        let (task_sender, task_receiver) = channel::<CompactionTask>(32);
+        let (result_sender, result_receiver) = channel::<CompactionResult>(32);
+
+        let compaction_loop =
+            tokio::spawn(async move { Self::compact_loop(task_receiver, result_sender).await });
+
+        Self {
+            sender: task_sender,
+            receiver: result_receiver,
+            compaction_loop: Some(compaction_loop),
+        }
+    }
+    pub async fn send_task(&self, task: CompactionTask) -> Result<(), LsmError> {
+        self.sender
+            .send(task)
+            .await
+            .map_err(|_| LsmError::Other("Failed to submit compaction task".to_string()))
+    }
+
+    pub async fn check_results(&mut self) -> Option<CompactionResult> {
+        self.receiver.try_recv().ok()
+    }
+
+    pub async fn drain_results(&mut self) -> Vec<CompactionResult> {
+        let mut results = Vec::new();
+
+        while let Ok(result) = self.receiver.try_recv() {
+            results.push(result);
+        }
+
+        results
+    }
+
+    async fn shut_down(&mut self) -> Result<(), LsmError> {
+        self.send_task(CompactionTask::PowerOff).await?;
+        if let Some(handle) = self.compaction_loop.take() {
+            handle
+                .await
+                .map_err(|e| LsmError::Other(format!("Compaction thread panicked: {:?}", e)))??;
+        }
+        Ok(())
     }
 
     async fn compact_loop(
@@ -66,17 +114,24 @@ impl Walle {
                     base_fpr,
                     parent_directory,
                     bloom_enabled,
-                } => match Self::compact(level, base_fpr, parent_directory, bloom_enabled) {
-                    Ok(compaction_result) => {
-                        let _ = sender.send(compaction_result).await;
+                } => {
+                    match Self::compact(level.clone(), base_fpr, parent_directory, bloom_enabled) {
+                        Ok(compaction_result) => {
+                            let _ = sender.send(compaction_result).await;
+                        }
+                        Err(e) => {
+                            let _ = sender
+                                .send(CompactionResult::Failed {
+                                    error_value: e,
+                                    original_level: level.depth,
+                                })
+                                .await;
+                        }
                     }
-                    Err(e) => {
-                        let _ = sender
-                            .send(CompactionResult::Failed { error_value: e })
-                            .await;
-                    }
-                },
-                CompactionTask::PowerOff => {}
+                }
+                CompactionTask::PowerOff => {
+                    break;
+                }
             }
         }
 
@@ -89,6 +144,7 @@ impl Walle {
         parent_directory: PathBuf,
         bloom_enabled: bool,
     ) -> Result<CompactionResult, LsmError> {
+        println!("Beginning level cmpaction!");
         let features = SSTableFeatures {
             fpr: level.width as f64 * base_fpr,
             item_count: level.total_entries,
@@ -108,6 +164,7 @@ impl Walle {
             }
         }
 
+        println!("Construction new iters");
         let mut new_table = StreamedSSTableBuilder::new(features, bloom_enabled, &file_name)?;
         let mut items_processed = 0;
 
@@ -126,12 +183,24 @@ impl Walle {
             }
         }
 
+        println!("construction finished");
+
         let compacted_table = new_table.finalize()?;
         let sending_result = CompactionResult::Completed {
             compacted_table,
             original_level: level.depth,
             items_processed,
         };
+        println!("created compaction result :{:?}", sending_result);
+
+        // cleanup
+        for table in level.inner {
+            if let Err(e) = table.delete() {
+                log::warn!("Failed to delete SSTable: {:?}", e);
+            }
+        }
+
+        println!("deleted tables and sending");
         Ok(sending_result)
     }
 }

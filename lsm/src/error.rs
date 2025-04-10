@@ -1,4 +1,7 @@
+use std::sync::mpsc::TryRecvError;
+
 use thiserror::Error;
+use tokio::task::JoinError;
 
 #[derive(Debug, Error)]
 pub enum LsmError {
@@ -10,6 +13,9 @@ pub enum LsmError {
 
     #[error("Key not found")]
     KeyNotFound,
+
+    #[error("Wall_E Compcation Error: {0}")]
+    TokioCompactionError(#[from] JoinError),
 
     #[error("Other error: {0}")]
     Other(String),
