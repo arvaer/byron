@@ -7,9 +7,10 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::wall_e::CompactionTask;
+use crate::level::Level;
 use crate::{
     error::LsmError,
-    lsm_database::{Level, LsmDatabase},
+    lsm_database::LsmDatabase,
 };
 
 impl LsmDatabase {

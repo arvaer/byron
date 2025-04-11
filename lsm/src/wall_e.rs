@@ -9,7 +9,7 @@ use tokio::{
 };
 use uuid::Uuid;
 
-use crate::{error::LsmError, lsm_database::Level};
+use crate::{error::LsmError, level::Level};
 
 #[derive(Debug)]
 pub enum CompactionTask {

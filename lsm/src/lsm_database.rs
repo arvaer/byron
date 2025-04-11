@@ -1,3 +1,4 @@
+use crate::level::Level;
 use crate::wall_e::CompactionResult;
 use crate::wall_e::Walle;
 use key_value::KeyValue;
@@ -8,18 +9,10 @@ use uuid::Uuid;
 
 use crate::error::LsmError;
 
-#[derive(Debug, Clone)]
-pub struct Level {
-    pub inner: Vec<Arc<SSTable>>,
-    pub depth: usize,
-    pub width: usize,
-    pub total_entries: usize,
-}
 
 #[derive(Debug)]
 pub struct LsmDatabase {
     pub primary: MemTable,
-    pub tables: Vec<Arc<SSTable>>,
     pub capacity_expansion_factor: f64,
     pub parent_directory: PathBuf,
     pub levels: Vec<Level>,
@@ -32,7 +25,6 @@ impl Default for LsmDatabase {
     fn default() -> Self {
         Self {
             primary: MemTable::default(),
-            tables: Vec::new(),
             parent_directory: PathBuf::from("./data"),
             capacity_expansion_factor: 1.618,
             levels: Vec::new(),
@@ -53,7 +45,6 @@ impl LsmDatabase {
         };
         Self {
             primary: MemTableBuilder::default().max_entries(10).build(),
-            tables: Vec::new(),
             parent_directory: parent_directory.into(),
             capacity_expansion_factor: capacity_expansion_factor.unwrap_or(1.618),
             levels: vec![first_level],
@@ -107,6 +98,13 @@ impl LsmDatabase {
                     println!("Inserting from check_for_compactions");
 
                     let level = &mut self.levels[original_level];
+                    for table in &level.inner {
+                        if let Err(e) = table.delete() {
+                            log::warn!("Failed to delete SSTable: {:?}", e);
+                    println!("deleted tables and sending");
+                        }
+
+                    }
                     level.inner.clear();
                     level.total_entries = 0;
 
