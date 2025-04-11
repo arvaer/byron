@@ -1,10 +1,5 @@
-use key_value::KeyValue;
-use sstable::builder::SSTableFeatures;
-use sstable::{streamed_builder::StreamedSSTableBuilder, SSTable};
-use std::cmp::Ordering;
-use std::collections::BinaryHeap;
+use sstable::SSTable;
 use std::sync::Arc;
-use uuid::Uuid;
 
 use crate::wall_e::CompactionTask;
 use crate::level::Level;
