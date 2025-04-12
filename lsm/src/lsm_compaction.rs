@@ -92,6 +92,7 @@ impl LsmDatabase {
                 level_number
             );
             level_mutex.notify_insertion_complete.notify_waiters();
+            level_mutex.clear().await
         }
 
         Ok(())
@@ -101,9 +102,9 @@ impl LsmDatabase {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
     use key_value::KeyValue;
     use sstable::{builder::SSTableFeatures, streamed_builder::StreamedSSTableBuilder};
+    use std::path::PathBuf;
     use tempfile::tempdir;
 
     fn create_test_kv(key: &str, value: &str) -> KeyValue {
@@ -134,17 +135,7 @@ mod tests {
 
     // Helper to create a test database
     fn create_test_db() -> LsmDatabase {
-        let mut db = LsmDatabase::new(String::from("./test"), None);
-        if db.levels.is_empty() {
-            let lvl = Arc::new(LevelMutex::new(Level {
-                inner: Vec::new(),
-                depth: 0,
-                width: 2,
-                total_entries: 0,
-            }));
-            db.levels.push(lvl);
-        }
-        return db;
+        LsmDatabase::new(String::from("./test"), None)
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -225,6 +216,8 @@ mod tests {
         // Insert 2 tables to level 0, triggering compaction to level 1
         db.insert_new_table(tables[0].clone(), 0).await.unwrap();
         db.insert_new_table(tables[1].clone(), 0).await.unwrap();
+
+        db.check_for_compactions().await.unwrap();
 
         // Level 0 should be empty, level 1 should have 1 compacted table
         assert_eq!(db.levels[0].get_len().await, 0);

@@ -44,7 +44,7 @@ impl LsmDatabase {
             total_entries: 0,
         };
         Self {
-            primary: MemTableBuilder::default().max_entries(10).build(),
+            primary: MemTableBuilder::default().max_entries(1000).build(),
             parent_directory: parent_directory.into(),
             capacity_expansion_factor: capacity_expansion_factor.unwrap_or(1.618),
             levels: vec![Arc::new(LevelMutex::new(first_level))],
@@ -57,7 +57,7 @@ impl LsmDatabase {
     fn flash(&mut self) -> tokio::task::JoinHandle<Arc<SSTable>> {
         let mut old_table = mem::replace(
             &mut self.primary,
-            MemTableBuilder::default().max_entries(10).build(),
+            MemTableBuilder::default().max_entries(1000).build(),
         );
 
         let parent_directory = self.parent_directory.clone();
@@ -78,7 +78,7 @@ impl LsmDatabase {
         }
     }
 
-    async fn check_for_compactions(&mut self) -> Result<(), LsmError> {
+    pub async fn check_for_compactions(&mut self) -> Result<(), LsmError> {
         let compactions = self.wall_e.drain_results().await;
         for pending in compactions {
             match pending {
@@ -100,9 +100,8 @@ impl LsmDatabase {
                         original_level
                     );
 
-                    // Clear the level once upon receiving the compaction result.
-                    let level_mutex = &self.levels[original_level];
-                    level_mutex.clear().await;
+  //                  let level_mutex = &self.levels[original_level];
+ //                   level_mutex.clear().await;
 
                     self.insert_new_table(compacted_table, target_level).await?;
                 }
