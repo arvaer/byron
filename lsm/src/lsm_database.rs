@@ -1,4 +1,5 @@
 use crate::level::Level;
+use crate::level::LevelMutex;
 use crate::wall_e::CompactionResult;
 use crate::wall_e::Walle;
 use key_value::KeyValue;
@@ -9,13 +10,12 @@ use uuid::Uuid;
 
 use crate::error::LsmError;
 
-
 #[derive(Debug)]
 pub struct LsmDatabase {
     pub primary: MemTable,
     pub capacity_expansion_factor: f64,
     pub parent_directory: PathBuf,
-    pub levels: Vec<Level>,
+    pub levels: Vec<Arc<LevelMutex>>,
     pub base_fpr: f64,
     pub wall_e: Walle,
     pub pending_compactions: HashMap<usize, usize>,
@@ -47,7 +47,7 @@ impl LsmDatabase {
             primary: MemTableBuilder::default().max_entries(10).build(),
             parent_directory: parent_directory.into(),
             capacity_expansion_factor: capacity_expansion_factor.unwrap_or(1.618),
-            levels: vec![first_level],
+            levels: vec![Arc::new(LevelMutex::new(first_level))],
             base_fpr: 0.005,
             wall_e: Walle::new(),
             pending_compactions: HashMap::new(),
@@ -80,7 +80,7 @@ impl LsmDatabase {
 
     async fn check_for_compactions(&mut self) -> Result<(), LsmError> {
         let compactions = self.wall_e.drain_results().await;
-        for pending in compactions{
+        for pending in compactions {
             match pending {
                 CompactionResult::Completed {
                     compacted_table,
@@ -95,61 +95,15 @@ impl LsmDatabase {
                     }
 
                     let target_level = original_level + 1;
-                    println!("Inserting from check_for_compactions");
-
-                    let level = &mut self.levels[original_level];
-                    for table in &level.inner {
-                        if let Err(e) = table.delete() {
-                            log::warn!("Failed to delete SSTable: {:?}", e);
-                    println!("deleted tables and sending");
-                        }
-
-                    }
-                    level.inner.clear();
-                    level.total_entries = 0;
-
-                    self.insert_new_table(compacted_table, target_level).await?;
-                }
-
-                CompactionResult::Failed {
-                    error_value,
-                    original_level,
-                } => {
                     println!(
-                        "Compaction failed for level: {} with error: {:?}",
-                        original_level,
-                        error_value
+                        "Inserting from check_for_compactions at level {}",
+                        original_level
                     );
-                    if let Some(entry) = self.pending_compactions.get_mut(&original_level) {
-                        *entry -= 1;
-                        if *entry == 0 {
-                            self.pending_compactions.remove(&original_level);
-                        }
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
 
-    async fn check_for_compactions_old(&mut self) -> Result<(), LsmError> {
-        // Process all available compaction results
-        while let Some(pending) = self.wall_e.check_results().await {
-            match pending {
-                CompactionResult::Completed {
-                    compacted_table,
-                    original_level,
-                    items_processed: _,
-                } => {
-                    if let Some(entry) = self.pending_compactions.get_mut(&original_level) {
-                        *entry -= 1;
-                        if *entry == 0 {
-                            self.pending_compactions.remove(&original_level);
-                        }
-                    }
+                    // Clear the level once upon receiving the compaction result.
+                    let level_mutex = &self.levels[original_level];
+                    level_mutex.clear().await;
 
-                    let target_level = original_level + 1;
-                    println!("Inserting from check_for_compactions");
                     self.insert_new_table(compacted_table, target_level).await?;
                 }
 
@@ -159,8 +113,7 @@ impl LsmDatabase {
                 } => {
                     println!(
                         "Compaction failed for level: {} with error: {:?}",
-                        original_level,
-                        error_value
+                        original_level, error_value
                     );
                     if let Some(entry) = self.pending_compactions.get_mut(&original_level) {
                         *entry -= 1;
@@ -179,24 +132,26 @@ impl LsmDatabase {
         if let Some(kv) = self.primary.get(&key) {
             return Ok(kv.into());
         }
-        for level in self.levels.iter() {
+        for level_mutex in self.levels.iter() {
+            let level = level_mutex.read().await;
             for sstable in level.inner.iter() {
                 match sstable.get(key.clone()) {
                     Ok(kv) => return Ok(kv),
-                    Err(SSTableError::KeyNotfound) => continue,
+                    Err(sstable::error::SSTableError::KeyNotfound) => continue,
                     Err(e) => return Err(LsmError::SSTable(e)),
                 }
             }
         }
-
         Err(LsmError::KeyNotFound)
     }
 
+    /// put inserts the key-value into the primary memtable,
+    /// and once capacity is reached, flashes the memtable and inserts a new table.
     pub async fn put(&mut self, key: String, value: String) -> Result<(), LsmError> {
         self.check_for_compactions().await?;
         self.primary.put(key, value);
         if self.primary.at_capacity() {
-            println!("Inserting new table");
+            println!("Inserting new table from primary memtable flush");
             let sstable = self.flash().await.expect("Flushing thread panicked");
             self.insert_new_table(sstable, 0).await?;
         }
@@ -246,7 +201,7 @@ mod lsm_database_tests {
             db.put(key, value).await.unwrap();
         }
 
-        assert!(!db.levels[0].inner.is_empty() || !db.levels[1].inner.is_empty());
+        assert!(!db.levels[0].is_empty().await || !db.levels[1].is_empty().await);
         // SSTable should be in level 0 or 1
     }
 
@@ -266,7 +221,7 @@ mod lsm_database_tests {
         for i in 0..20 {
             let (key, value) = create_kv("compaction", i);
             let result = db.get(key.clone()).await;
-        println!("{:?}", db);
+            println!("{:?}", db);
             assert!(result.is_ok(), "Failed to retrieve key: {}", key);
             assert_eq!(result.unwrap().value, value);
         }

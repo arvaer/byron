@@ -5,7 +5,7 @@ use key_value::KeyValue;
 use sstable::{builder::SSTableFeatures, streamed_builder::StreamedSSTableBuilder, SSTable};
 use tokio::{
     sync::mpsc::{self, channel, Receiver, Sender},
-    task::{JoinHandle},
+    task::JoinHandle,
 };
 use uuid::Uuid;
 
