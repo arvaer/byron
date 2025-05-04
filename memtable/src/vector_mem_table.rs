@@ -6,7 +6,7 @@ use sstable::{
 use std::collections::BTreeMap;
 use std::{path::PathBuf, sync::Arc};
 
-use crate::MemTableOperations;
+use crate::{MemTableOperations, RangeResult};
 
 #[derive(Debug, Default)]
 pub struct VectorMemTable {
@@ -35,8 +35,37 @@ impl MemTableOperations for VectorMemTable {
             .map(|kv| Box::new(kv.clone()))
     }
 
-    fn range(&self, from_m: &str, to_n: &str) -> Result<>{
-        todo!()
+    fn range(&self, from_m: &str, to_n: &str) -> (Vec<Box<KeyValue>>, RangeResult) {
+        let mut deduped = BTreeMap::new();
+        for kv in &self.data {
+            deduped.insert(kv.key.clone(), kv.clone());
+        }
+
+        let mut entries = Vec::new();
+        let mut saw_to = false;
+
+        // scan from the first key ≥ from_m
+        for (key, kv) in deduped.range(from_m.to_owned()..) {
+            if key.as_str() <= to_n {
+                entries.push(Box::new(kv.clone()));
+                if key == to_n {
+                    saw_to = true;
+                }
+            } else {
+                // first key > to_n
+                return (entries, RangeResult::FirstKeyFound);
+            }
+        }
+
+        if entries.is_empty() {
+            (entries, RangeResult::KeyNotFound)
+        } else if saw_to {
+            (entries, RangeResult::FullSetFound)
+        } else {
+            // we found some entries but never hit to_n,
+            // and there was no key > to_n to stop us
+            (entries, RangeResult::FirstKeyFound)
+        }
     }
 
     fn at_capacity(&self) -> bool {

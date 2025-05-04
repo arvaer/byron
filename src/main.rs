@@ -1,11 +1,10 @@
-use std::time::Instant;
-use lsm::lsm_database::LsmDatabase;
-use lsm::lsm_operators::LsmSearchOperators;
+use lsm::{lsm_compaction::Monkey, lsm_database::LsmDatabase};
 use rand::Rng;
+use std::time::Instant;
 
 fn main() {
     env_logger::init();
-    let parent_directory = "/mnt/C/data".to_string();
+    let parent_directory = "./data".to_string();
     let mut db = LsmDatabase::new(parent_directory, None);
 
     // Time 10,000,000 writes.
@@ -14,7 +13,7 @@ fn main() {
         // Using 8-digit formatting so keys and values have consistent length.
         let key = format!("key-{:08}", i);
         let value = format!("value-{:08}", i);
-        db.put(key, value);
+        db.put(key, value).unwrap();
     }
     let duration_writes = start_writes.elapsed();
     println!("Inserted 100,000 entries in {:?}", duration_writes);
@@ -23,6 +22,7 @@ fn main() {
     let mut rng = rand::thread_rng();
     let mut found_count = 0;
     let mut error_count = 0;
+
     let start_reads = Instant::now();
     for _ in 0..10_000 {
         let random_index = rng.gen_range(0..75_000);
@@ -34,6 +34,28 @@ fn main() {
     }
     let duration_reads = start_reads.elapsed();
     println!("Performed 10,000 random reads in {:?}", duration_reads);
-    println!("Found {} keys, encountered {} errors", found_count, error_count);
-}
+    println!(
+        "Found {} keys, encountered {} errors",
+        found_count, error_count
+    );
 
+    let start_key = "key-00005000".to_string();
+    let end_key = "key-00005010".to_string();
+
+    let start_range = Instant::now();
+    match db.range(start_key.clone(), end_key.clone()) {
+        Ok(results) => {
+            let elapsed = start_range.elapsed();
+            println!(
+                "Range query [{} … {}] returned {} entries in {:?}",
+                start_key,
+                end_key,
+                results.len(),
+                elapsed
+            );
+        }
+        Err(e) => {
+            println!("Range query [{} … {}] failed: {:?}", start_key, end_key, e);
+        }
+    }
+}

@@ -5,7 +5,7 @@ use sstable::{builder::SSTableFeatures, error::SSTableError, SSTable};
 use std::{mem, path::PathBuf, sync::Arc, thread};
 use uuid::Uuid;
 
-use crate::{error::LsmError, lsm_operators::LsmSearchOperators};
+use crate::error::LsmError;
 
 #[derive(Debug)]
 pub struct Level {
@@ -56,14 +56,13 @@ impl LsmDatabase {
         }
     }
 
-    fn flash(&mut self) -> std::thread::JoinHandle<Arc<SSTable>> {
+    pub fn flash(&mut self) -> std::thread::JoinHandle<Arc<SSTable>> {
         let mut old_table = mem::replace(
             &mut self.primary,
             MemTableBuilder::default().max_entries(10).build(),
         );
 
         let parent_directory = self.parent_directory.clone();
-        let tables_len = self.tables.len();
         let features = self.calculate_sstable_features(old_table.current_length());
 
         thread::spawn(move || {
@@ -110,7 +109,6 @@ impl LsmDatabase {
         self.primary.put(key, value);
         if self.primary.at_capacity() {
             let sstable = self.flash().join().expect("Flushing thread panicked");
-            println!("Created new sstable after flush op");
             self.insert_new_table(sstable, 0)?;
         }
         Ok(())
@@ -118,34 +116,78 @@ impl LsmDatabase {
 
     pub fn delete(&mut self, key: String) -> Result<(), LsmError> {
         let sentinel = String::from("d34db33f");
-        self.put(key, sentinel);
+        self.put(key, sentinel)?;
         Ok(())
     }
 
-    fn range(&mut self, from_n: String, to_m: String) {
-        //So we know that keys are stored in sorted order. This means, trivially,
-        //that we just need to grab all the keys and pass them back.
-        //however, this may have unexpected consequences so maybe we need to take a closure that
-        //defines the sort order?
-        // theres a couple of conditions here.
-        // the first: we have both keys inside of the primary buffer.
-        // the second: we have the firt key in primary buffer, the rest in the sstables
-        // the third: we have both keys in the sstabls.
+    pub fn range(&mut self, from_m: String, to_n: String) -> Result<Vec<Box<KeyValue>>, LsmError> {
+        let (mut results, flag) = self.primary.range(&from_m.clone(), &to_n.clone());
 
-        let results_buffer : Vec<Arc<KeyValue>>= Vec::new();
+        match flag {
+            memtable::RangeResult::FullSetFound => {
+                return Ok(results);
+            }
+            memtable::RangeResult::FirstKeyFound => {
+                let start_key = results
+                    .last()
+                    .map(|kv| kv.key.clone())
+                    .unwrap_or_else(|| from_m.clone());
 
-        for candidate in self.primary.into_iter().enumerate(){
+                'outer: for level in &self.levels {
+                    for sstable in &level.inner {
+                        let (sst_entries, found_end) =
+                            sstable.get_until(&to_n).map_err(LsmError::SSTable)?;
 
+                        for box_kv in sst_entries {
+                            let k = &box_kv.key;
+                            if k.as_str() > start_key.as_str() && k.as_str() >= from_m.as_str() {
+                                results.push(box_kv);
+                            }
+                        }
+
+                        if found_end {
+                            break 'outer;
+                        }
+                    }
+                }
+            }
+            memtable::RangeResult::KeyNotFound => {
+                'outer: for level in &self.levels {
+                    for sstable in &level.inner {
+                        match sstable.get(from_m.clone()) {
+                            Ok(_) => {
+                                for kv_res in sstable.iter() {
+                                    let kv = kv_res.map_err(LsmError::SSTable)?;
+
+                                    if kv.key < from_m {
+                                        continue;
+                                    }
+                                    if kv.key > to_n {
+                                        break 'outer;
+                                    }
+
+                                    results.push(Box::new(kv.clone()));
+                                }
+                                break 'outer;
+                            }
+                            Err(SSTableError::KeyNotfound) => continue,
+                            Err(e) => return Err(LsmError::SSTable(e)),
+                        }
+                    }
+                }
+            }
         }
-
-
+        if results.is_empty() {
+            Err(LsmError::KeyNotFound)
+        } else {
+            Ok(results)
+        }
     }
 }
 
 #[cfg(test)]
 mod lsm_database_tests {
     use super::*;
-    use memtable::MemTableOperations;
     use tempfile::tempdir;
 
     fn create_test_db() -> (LsmDatabase, tempfile::TempDir) {

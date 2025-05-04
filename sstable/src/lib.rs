@@ -39,7 +39,6 @@ impl SSTable {
             return Ok(());
         }
 
-        println!("Dropping sstable file {}", self.file_path.display());
         match std::fs::remove_file(&self.file_path) {
             Ok(_) => {
                 *deleted = true;
@@ -506,6 +505,26 @@ impl SSTable {
     pub fn iter(&self) -> SSTableIterator {
         SSTableIterator::new(self)
     }
+
+    pub fn get_until(
+        &self,
+        to_key: &str,
+    ) -> Result<(Vec<Box<KeyValue>>, bool), SSTableError> {
+        let mut result = Vec::new();
+        let mut found = false;
+
+        for kv_res in self.iter() {
+            let kv = Box::new(kv_res.unwrap());
+            if kv.key == to_key {
+                result.push(kv);
+                found = true;
+                break;
+            }
+            result.push(kv);
+        }
+
+        Ok((result, found))
+    }
 }
 
 impl<'a> IntoIterator for &'a SSTable {
@@ -545,8 +564,7 @@ mod tests {
                 restart_indices: Vec::new(),
                 bloom_filter: None,
                 actual_item_count: 0,
-                deleted: Mutex::new(false)
-
+                deleted: Mutex::new(false),
             }
         }
     }
@@ -717,7 +735,7 @@ mod tests {
 
         let features = SSTableFeatures {
             fpr: 0.01,
-            item_count: 1000
+            item_count: 1000,
         };
 
         log::info!("Creating SSTableBuilder...");
@@ -834,7 +852,7 @@ mod tests {
         let file_path = temp_dir.path().join("test.sst");
 
         let features = SSTableFeatures {
-            item_count:1000,
+            item_count: 1000,
             fpr: 0.01,
         };
 
@@ -861,7 +879,7 @@ mod tests {
         let file_path = temp_dir.path().join("test.sst");
 
         let features = SSTableFeatures {
-            item_count:1000,
+            item_count: 1000,
             fpr: 0.01,
         };
 
@@ -896,7 +914,7 @@ mod tests {
         let file_path = temp_dir.path().join("test.sst");
 
         let features = SSTableFeatures {
-            item_count:1000,
+            item_count: 1000,
             fpr: 0.01,
         };
 
@@ -927,7 +945,7 @@ mod tests {
         let file_path = temp_dir.path().join("test.sst");
 
         let features = SSTableFeatures {
-            item_count:1000,
+            item_count: 1000,
             fpr: 0.01,
         };
 
@@ -962,7 +980,7 @@ mod tests {
         let file_path = temp_dir.path().join("test.sst");
 
         let features = SSTableFeatures {
-            item_count:1000,
+            item_count: 1000,
             fpr: 0.01,
         };
 
@@ -1056,7 +1074,7 @@ mod tests {
 
         let features = SSTableFeatures {
             fpr: 0.01,
-            item_count: 1000
+            item_count: 1000,
         };
 
         let mut builder = SSTableBuilder::new(features, &file_path)?;
@@ -1087,7 +1105,7 @@ mod tests {
 
         let features = SSTableFeatures {
             fpr: 0.01,
-            item_count:100
+            item_count: 100,
         };
 
         let mut builder = SSTableBuilder::new(features, &file_path)?;

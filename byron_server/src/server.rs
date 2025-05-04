@@ -2,7 +2,6 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use lsm::lsm_database::LsmDatabase;
-use lsm::lsm_operators::LsmSearchOperators;
 use tonic::{transport::Server, Request, Response, Status};
 
 use byron::byron_server::{Byron, ByronServer};
