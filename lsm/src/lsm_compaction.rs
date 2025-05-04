@@ -72,7 +72,8 @@ impl Monkey for LsmDatabase {
     ) -> Result<(), LsmError> {
         log::info!(
             "Step 1: Inserting table with {} entries into level {}",
-            incoming_table.actual_item_count, level_number
+            incoming_table.actual_item_count,
+            level_number
         );
 
         let mut final_level_flag = false;
@@ -126,7 +127,8 @@ impl Monkey for LsmDatabase {
             let total_entries = self.levels[level_number].total_entries;
             log::info!(
                 "Step 5.1: Creating new table with fpr {} and {} entries",
-                fpr, total_entries
+                fpr,
+                total_entries
             );
 
             let features = SSTableFeatures {
@@ -166,6 +168,9 @@ impl Monkey for LsmDatabase {
                 items_processed += 1;
                 if let Some(next_kv_result) = iterators[sstable_idx].next() {
                     let next_kv = next_kv_result?;
+                    if next_kv.value == "deadbeef" {
+                        continue;
+                    }
                     min_heap.push(HeapItem {
                         key_value: next_kv,
                         sstable_idx,

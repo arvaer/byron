@@ -35,6 +35,10 @@ impl MemTableOperations for VectorMemTable {
             .map(|kv| Box::new(kv.clone()))
     }
 
+    fn range(&self, from_m: &str, to_n: &str) -> Result<>{
+        todo!()
+    }
+
     fn at_capacity(&self) -> bool {
         self.data.len() >= self.max_entries
     }

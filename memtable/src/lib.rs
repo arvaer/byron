@@ -10,6 +10,7 @@ use vector_mem_table::VectorMemTable;
 pub trait MemTableOperations {
     fn put(&mut self, key: String, value: String);
     fn get(&self, key: &str) -> Option<Box<KeyValue>>;
+    fn range();
     fn at_capacity(&self) -> bool;
     fn current_length(&self) -> usize;
     fn flush( &mut self, path: PathBuf, table_params: SSTableFeatures,) -> Result<Arc<SSTable>, crate::error::MemTableError>;
@@ -45,6 +46,10 @@ impl MemTableOperations for MemTable {
             //shared reference
             DataStructure::Vector(memtable) => memtable.get(key)
         }
+    }
+
+    fn range(){
+        todo!()
     }
 
     fn at_capacity(&self) -> bool {

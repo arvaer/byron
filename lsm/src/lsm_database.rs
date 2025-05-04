@@ -1,9 +1,9 @@
+use crate::lsm_compaction::Monkey;
 use key_value::KeyValue;
 use memtable::{mem_table_builder::MemTableBuilder, MemTable, MemTableOperations};
 use sstable::{builder::SSTableFeatures, error::SSTableError, SSTable};
-use uuid::Uuid;
 use std::{mem, path::PathBuf, sync::Arc, thread};
-use crate::lsm_compaction::Monkey;
+use uuid::Uuid;
 
 use crate::{error::LsmError, lsm_operators::LsmSearchOperators};
 
@@ -12,7 +12,7 @@ pub struct Level {
     pub inner: Vec<Arc<SSTable>>,
     pub depth: usize,
     pub width: usize,
-    pub total_entries: usize
+    pub total_entries: usize,
 }
 
 #[derive(Debug)]
@@ -22,7 +22,7 @@ pub struct LsmDatabase {
     pub capacity_expansion_factor: f64,
     pub parent_directory: PathBuf,
     pub levels: Vec<Level>,
-    pub base_fpr: f64
+    pub base_fpr: f64,
 }
 
 impl Default for LsmDatabase {
@@ -33,7 +33,7 @@ impl Default for LsmDatabase {
             parent_directory: PathBuf::from("./data"),
             capacity_expansion_factor: 1.618,
             levels: Vec::new(),
-            base_fpr: 0.005
+            base_fpr: 0.005,
         }
     }
 }
@@ -44,7 +44,7 @@ impl LsmDatabase {
             inner: Vec::new(),
             depth: 0,
             width: 2,
-            total_entries: 0
+            total_entries: 0,
         };
         Self {
             primary: MemTableBuilder::default().max_entries(1000).build(),
@@ -52,7 +52,7 @@ impl LsmDatabase {
             parent_directory: parent_directory.into(),
             capacity_expansion_factor: capacity_expansion_factor.unwrap_or(1.618),
             levels: vec![first_level],
-            base_fpr: 0.005
+            base_fpr: 0.005,
         }
     }
 
@@ -80,17 +80,23 @@ impl LsmDatabase {
             fpr: 0.01,
         }
     }
-}
 
-impl LsmSearchOperators for LsmDatabase {
-    fn get(&self, key: String) -> Result<Arc<KeyValue>, LsmError> {
+    pub fn get(&self, key: String) -> Result<Arc<KeyValue>, LsmError> {
         if let Some(kv) = self.primary.get(&key) {
+            if kv.value == "deadbeef" {
+                return Err(LsmError::KeyNotFound);
+            }
             return Ok(kv.into());
         }
         for level in self.levels.iter() {
             for sstable in level.inner.iter() {
                 match sstable.get(key.clone()) {
-                    Ok(kv) => return Ok(kv),
+                    Ok(kv) => {
+                        if kv.value == "d34b33f" {
+                            return Err(LsmError::KeyNotFound);
+                        }
+                        return Ok(kv);
+                    }
                     Err(SSTableError::KeyNotfound) => continue,
                     Err(e) => return Err(LsmError::SSTable(e)),
                 }
@@ -100,7 +106,7 @@ impl LsmSearchOperators for LsmDatabase {
         Err(LsmError::KeyNotFound)
     }
 
-    fn put(&mut self, key: String, value: String)-> Result<(), LsmError> {
+    pub fn put(&mut self, key: String, value: String) -> Result<(), LsmError> {
         self.primary.put(key, value);
         if self.primary.at_capacity() {
             let sstable = self.flash().join().expect("Flushing thread panicked");
@@ -110,8 +116,29 @@ impl LsmSearchOperators for LsmDatabase {
         Ok(())
     }
 
-    fn range() {
-        todo!();
+    pub fn delete(&mut self, key: String) -> Result<(), LsmError> {
+        let sentinel = String::from("d34db33f");
+        self.put(key, sentinel);
+        Ok(())
+    }
+
+    fn range(&mut self, from_n: String, to_m: String) {
+        //So we know that keys are stored in sorted order. This means, trivially,
+        //that we just need to grab all the keys and pass them back.
+        //however, this may have unexpected consequences so maybe we need to take a closure that
+        //defines the sort order?
+        // theres a couple of conditions here.
+        // the first: we have both keys inside of the primary buffer.
+        // the second: we have the firt key in primary buffer, the rest in the sstables
+        // the third: we have both keys in the sstabls.
+
+        let results_buffer : Vec<Arc<KeyValue>>= Vec::new();
+
+        for candidate in self.primary.into_iter().enumerate(){
+
+        }
+
+
     }
 }
 
@@ -120,7 +147,6 @@ mod lsm_database_tests {
     use super::*;
     use memtable::MemTableOperations;
     use tempfile::tempdir;
-
 
     fn create_test_db() -> (LsmDatabase, tempfile::TempDir) {
         let temp_dir = tempdir().unwrap();
@@ -154,7 +180,8 @@ mod lsm_database_tests {
             db.put(key, value).unwrap();
         }
 
-        assert!(!db.levels[0].inner.is_empty() || !db.levels[1].inner.is_empty()); // SSTable should be in level 0 or 1
+        assert!(!db.levels[0].inner.is_empty() || !db.levels[1].inner.is_empty());
+        // SSTable should be in level 0 or 1
     }
 
     #[test]
@@ -185,7 +212,11 @@ mod lsm_database_tests {
         }
 
         // Verify that we have at least 3 levels
-        assert!(db.levels.len() >= 3, "Expected at least 3 levels, got {}", db.levels.len());
+        assert!(
+            db.levels.len() >= 3,
+            "Expected at least 3 levels, got {}",
+            db.levels.len()
+        );
 
         // Check if we can still retrieve all keys after multi-level compaction
         for i in 0..100 {
@@ -266,7 +297,6 @@ mod lsm_database_tests {
         }
     }
 
-
     #[test]
     fn test_lookup_nonexistent_key() {
         let (mut db, _temp_dir) = create_test_db();
@@ -284,10 +314,9 @@ mod lsm_database_tests {
 
         if let Err(err) = result {
             match err {
-                LsmError::KeyNotFound => { /* expected error */ },
+                LsmError::KeyNotFound => { /* expected error */ }
                 _ => panic!("Expected KeyNotFound error, got: {:?}", err),
             }
         }
     }
-
 }
