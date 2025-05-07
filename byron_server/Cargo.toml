@@ -4,11 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [[bin]] # Bin to run the HelloWorld gRPC server
-name = "byron"
+name = "server"
 path = "src/server.rs"
 
 [[bin]] # Bin to run the HelloWorld gRPC client
-name = "byron-client"
+name = "byron"
 path = "src/client.rs"
 
 [dependencies]

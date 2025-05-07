@@ -120,7 +120,7 @@ impl LsmDatabase {
         Ok(())
     }
 
-    pub fn range(&mut self, from_m: String, to_n: String) -> Result<Vec<Box<KeyValue>>, LsmError> {
+    pub fn range(&self, from_m: String, to_n: String) -> Result<Vec<Box<KeyValue>>, LsmError> {
         let (mut results, flag) = self.primary.range(&from_m.clone(), &to_n.clone());
 
         match flag {

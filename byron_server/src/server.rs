@@ -52,7 +52,8 @@ impl Byron for ByronServerContext {
         let key = input.key.to_string();
         let value = input.value.to_string();
         let mut db = self.database.write().await;
-        db.put(key, value);
+        let _ = db.put(key, value);
+        drop(db);
 
         let response = PutResponse {};
         tracing::info!("Processed put request successfully.");
@@ -65,25 +66,54 @@ impl Byron for ByronServerContext {
         request: Request<RangeRequest>,
     ) -> Result<Response<RangeResponse>, Status> {
         tracing::debug!("Received range request: {:?}", request);
-        let input = request.get_ret();
+        let input = request.get_ref();
         let start = input.start.to_string();
         let end = input.end.to_string();
 
         let db = self.database.read().await;
-        let values = db.range(start, end).map_err(|e| Status::internal(format!("Database Error: {:?}", e)))?;
-        let response = RangeResponse{
-            pairs: values
-        };
+        let values = db
+            .range(start, end)
+            .map_err(|e| Status::internal(format!("Database Error: {:?}", e)))?
+            .iter()
+            .map(|item| byron::KeyValue {
+                key: item
+                    .key
+                    .clone()
+                    .parse()
+                    .map_err(|e| Status::invalid_argument(format!("Kvp parsing error: {:?}", e)))
+                    .unwrap(),
+                value: item
+                    .value
+                    .clone()
+                    .parse()
+                    .map_err(|e| Status::invalid_argument(format!("Kvp parsing error: {:?}", e)))
+                    .unwrap(),
+            })
+            .collect();
+        drop(db);
+
+        let response = RangeResponse { pairs: values };
         tracing::info!("Returning range response: {:?}", response);
         Ok(Response::new(response))
     }
-
 
     async fn delete(
         &self,
         request: Request<DeleteRequest>,
     ) -> Result<Response<DeleteResponse>, Status> {
-        todo!()
+        tracing::debug!("Received delete request: {:?}", request);
+        let input = request.get_ref();
+        let key = input.key.to_string();
+
+        let mut db = self.database.write().await;
+        let _ = db
+            .delete(key)
+            .map_err(|e| Status::internal(format!("Database error: {:?}", e)))?;
+        drop(db);
+
+        let response = DeleteResponse {};
+        tracing::info!("Returning get response: {:?}", response);
+        Ok(Response::new(response))
     }
 
     async fn load(&self, request: Request<LoadRequest>) -> Result<Response<LoadResponse>, Status> {
