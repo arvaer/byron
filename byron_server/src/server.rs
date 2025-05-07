@@ -65,6 +65,28 @@ impl Byron for ByronServerContext {
         request: Request<RangeRequest>,
     ) -> Result<Response<RangeResponse>, Status> {
         tracing::debug!("Received range request: {:?}", request);
+        let input = request.get_ret();
+        let start = input.start.to_string();
+        let end = input.end.to_string();
+
+        let db = self.database.read().await;
+        let values = db.range(start, end).map_err(|e| Status::internal(format!("Database Error: {:?}", e)))?;
+        let response = RangeResponse{
+            pairs: values
+        };
+        tracing::info!("Returning range response: {:?}", response);
+        Ok(Response::new(response))
+    }
+
+
+    async fn delete(
+        &self,
+        request: Request<DeleteRequest>,
+    ) -> Result<Response<DeleteResponse>, Status> {
+        todo!()
+    }
+
+    async fn load(&self, request: Request<LoadRequest>) -> Result<Response<LoadResponse>, Status> {
         todo!()
     }
 }

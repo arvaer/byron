@@ -85,8 +85,8 @@ service byron {
   rpc Put(PutRequest) returns (PutResponse);
   rpc Get(GetRequest) returns (GetResponse);
   rpc Range(RangeRequest) returns (RangeResponse);
- // rpc Delete(DeleteRequest) returns (DeleteResponse);
-//  rpc Load(LoadRequest) returns (LoadResponse);
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+  rpc Load(LoadRequest) returns (LoadResponse);
   //rpc PrintStats(google.protobuf.Empty) returns (StatsResponse);
 }
 

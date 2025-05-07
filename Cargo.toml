@@ -21,3 +21,6 @@ members = [ "byron_server", "key_value", "lsm",
     "memtable", "sstable",
 ]
 #default-members = ["byron_server"]
+
+[profile.release]
+debug = 1
