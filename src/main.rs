@@ -9,7 +9,7 @@ fn main() {
 
     // Time 10,000,000 writes.
     let start_writes = Instant::now();
-    for i in 0..5_000_000 {
+    for i in 0..1_000_000 {
         // Using 8-digit formatting so keys and values have consistent length.
         let key = format!("key-{:08}", i);
         let value = format!("value-{:08}", i);

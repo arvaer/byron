@@ -2,6 +2,7 @@
 name = "byron_server"
 version = "0.1.0"
 edition = "2024"
+default-run="byron"
 
 [[bin]] # Bin to run the HelloWorld gRPC server
 name = "server"
@@ -19,6 +20,7 @@ tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
 lsm = { path = "../lsm/" }
 tracing = "0.1"
 tracing-subscriber = "0.3"
+clap = { version = "4.5.37", features = ["derive"] }
 
 [build-dependencies]
 tonic-build = "0.12"

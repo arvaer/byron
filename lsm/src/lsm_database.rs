@@ -82,7 +82,7 @@ impl LsmDatabase {
 
     pub fn get(&self, key: String) -> Result<Arc<KeyValue>, LsmError> {
         if let Some(kv) = self.primary.get(&key) {
-            if kv.value == "deadbeef" {
+            if kv.value == "d34db33f" {
                 return Err(LsmError::KeyNotFound);
             }
             return Ok(kv.into());

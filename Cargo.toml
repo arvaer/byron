@@ -1,26 +1,19 @@
 #![warn(rust_2018_idioms)]
 #![warn(clippy::all)]
 #![deny(warnings)]
-
 [package]
 name = "byron"
 version = "0.1.0"
 edition = "2024"
 
-[dependencies]
-memtable = { path = "./memtable" }
-sstable = { path = "./sstable" }
-lsm = { path = "./lsm" }
-tempfile = "3.19.1"
-thiserror = "2.0.12"
-rand = "0.9.0"
-env_logger = "0.11.7"
-
 [workspace]
-members = [ "byron", "key_value", "lsm",
-    "memtable", "sstable",
+members = [
+  "byron",
+  "key_value",
+  "lsm",
+  "memtable",
+  "sstable",
 ]
-#default-members = ["byron_server"]
+default-members = ["byron"]
 
-[profile.release]
-debug = 1
+
