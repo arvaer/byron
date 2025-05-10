@@ -59,7 +59,7 @@ impl LsmDatabase {
     pub fn flash(&mut self) -> std::thread::JoinHandle<Arc<SSTable>> {
         let mut old_table = mem::replace(
             &mut self.primary,
-            MemTableBuilder::default().max_entries(10).build(),
+            MemTableBuilder::default().max_entries(1000).build(),
         );
 
         let parent_directory = self.parent_directory.clone();

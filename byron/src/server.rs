@@ -14,9 +14,18 @@ pub mod byron {
         tonic::include_file_descriptor_set!("byron_descriptor");
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ByronServerContext {
     pub database: Arc<RwLock<LsmDatabase>>,
+}
+
+impl Default for ByronServerContext {
+    fn default() -> Self {
+        let database = LsmDatabase::new("./data".to_string(), None);
+        Self {
+            database: Arc::new(RwLock::new(database))
+        }
+    }
 }
 
 #[tonic::async_trait]
@@ -32,7 +41,7 @@ impl Byron for ByronServerContext {
             .get(key)
             .map_err(|e| Status::internal(format!("Database error: {:?}", e)))?;
 
-        let value: i32 = kv
+        let value: i64 = kv
             .value
             .parse()
             .map_err(|e| Status::invalid_argument(format!("Value parsing error: {:?}", e)))?;

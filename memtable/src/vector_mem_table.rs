@@ -8,7 +8,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use crate::{MemTableOperations, RangeResult};
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct VectorMemTable {
     data: Vec<KeyValue>,
     max_entries: usize,
@@ -19,6 +19,15 @@ impl VectorMemTable {
         Self {
             data: Vec::with_capacity(max_entries),
             max_entries,
+        }
+    }
+}
+
+impl Default for VectorMemTable {
+    fn default() -> Self {
+        Self {
+            data: Vec::with_capacity(1000),
+            max_entries: 1000
         }
     }
 }
