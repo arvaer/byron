@@ -168,7 +168,7 @@ impl Monkey for LsmDatabase {
                 items_processed += 1;
                 if let Some(next_kv_result) = iterators[sstable_idx].next() {
                     let next_kv = next_kv_result?;
-                    if next_kv.value == "deadbeef" {
+                    if next_kv.value == "d34db33f" {
                         continue;
                     }
                     min_heap.push(HeapItem {

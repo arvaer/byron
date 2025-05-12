@@ -1,64 +1,119 @@
 use lsm::{lsm_compaction::Monkey, lsm_database::LsmDatabase};
 use rand::Rng;
 use std::time::Instant;
+use tokio::io::{self, AsyncBufReadExt, AsyncReadExt, BufReader};
 
-fn main() {
-    env_logger::init();
+#[derive(Default, Debug)]
+pub struct WorkloadStats {
+    pub total_lines: usize,
+    pub put_success: usize,
+    pub put_fail: usize,
+    pub get_success: usize,
+    pub get_fail: usize,
+    pub delete_success: usize,
+    pub delete_fail: usize,
+    pub range_success: usize,
+    pub range_fail: usize,
+    pub parse_errors: usize,
+    pub unknown_commands: usize,
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let parent_directory = "./data".to_string();
-    let mut db = LsmDatabase::new(parent_directory, None);
+    let mut byron = LsmDatabase::new(parent_directory, None);
 
-    // Time 10,000,000 writes.
-    let start_writes = Instant::now();
-    for i in 0..5_000_000 {
-        // Using 8-digit formatting so keys and values have consistent length.
-        let key = format!("key-{:08}", i);
-        let value = format!("value-{:08}", i);
-        db.put(key, value).unwrap();
-    }
-    let duration_writes = start_writes.elapsed();
-    println!("Inserted 1,000,000 entries in {:?}", duration_writes);
+    let file = tokio::fs::File::open("workload.txt".to_string()).await?;
+    let reader = BufReader::new(file);
+    let mut lines = reader.lines();
+    let mut stats = WorkloadStats::default();
 
-    // Time 10,000 random reads.
-    let mut rng = rand::thread_rng();
-    let mut found_count = 0;
-    let mut error_count = 0;
-
-    let start_reads = Instant::now();
-    for _ in 0..500_000 {
-        let random_index = rng.gen_range(0..2_500_000);
-        let key = format!("key-{:08}", random_index);
-        match db.get(key) {
-            Ok(_) => found_count += 1,
-            Err(_) => error_count += 1,
+    while let Some(line) = lines.next_line().await? {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.is_empty() {
+            continue;
         }
-    }
-    let duration_reads = start_reads.elapsed();
-    println!("Performed 100,000 random reads in {:?}", duration_reads);
-    println!(
-        "Found {} keys, encountered {} errors",
-        found_count, error_count
-    );
 
-    let start_key = "key-00005000".to_string();
-    let end_key = "key-00005010".to_string();
+        match parts[0] {
+            "p" if parts.len() == 3 => {
+                let key = parts[1].parse::<i64>()?;
+                let value = parts[2].parse::<i64>()?;
+                match byron.put(key.to_string(), value.to_string()) {
+                    Ok(_) => stats.put_success += 1,
+                    Err(e) => {
+                        stats.put_fail += 1;
+                        eprintln!("Failed to handle put({}, {}): {}", key, value, e);
+                    }
+                }
+            }
+            "g" if parts.len() == 2 => match parts[1].parse::<i64>() {
+                Ok(key) => match byron.get(key.to_string()) {
+                    Ok(target) => {
+                        println!("GET {} -> {}", key, target.value);
+                    }
+                    Err(e) => {
+                        stats.get_fail += 1;
+                        eprintln!("Failed to handle get({}): {}", key, e);
+                    }
+                },
+                Err(_) => stats.parse_errors += 1,
+            },
+            "d" if parts.len() == 2 => match parts[1].parse::<i64>() {
+                Ok(key) => match  byron.delete(key.to_string()) {
+                    Ok(_) => stats.delete_success += 1,
+                    Err(e) => {
+                        stats.delete_fail += 1;
+                        eprintln!("Failed to handle delete({}): {}", key, e);
+                    }
+                },
+                Err(_) => stats.parse_errors += 1,
+            },
+            "r" if parts.len() == 3 => {
+                let from = parts[1].parse::<i64>()?;
+                let to = parts[2].parse::<i64>()?;
 
-    let start_range = Instant::now();
-    match db.range(start_key.clone(), end_key.clone()) {
-        Ok(results) => {
-            let elapsed = start_range.elapsed();
-            println!(
-                "Range query [{} … {}] returned {} entries in {:?}",
-                start_key,
-                end_key,
-                results.len(),
-                elapsed
-            );
-            for res in results {
-                println!("Key: {:?} -> Value: {:?}", res.key, res.value);
+                match byron.range(from.to_string(), to.to_string()) {
+                    Ok(target) => {
+                        for value in target {
+                            println!("{} -> {}", value.key, value.value);
+                        }
+                        stats.range_success += 1;
+                    }
+                    Err(e) => {
+                        stats.range_fail += 1;
+                        eprintln!("Failed to handle range({}, {}): {}", from, to, e);
+                    }
+                }
+            }
+            _ => {
+                stats.unknown_commands += 1;
+                eprintln!("Unknown or malformed command: {:?}", parts);
             }
         }
-        Err(e) => {
-            println!("Range query [{} … {}] failed: {:?}", start_key, end_key, e);
-        }
     }
+
+    println!("\n=== Workload Summary ===");
+    println!("Total lines:            {}", stats.total_lines);
+    println!(
+        "PUT:    {} success / {} fail",
+        stats.put_success, stats.put_fail
+    );
+    println!(
+        "GET:    {} success / {} fail",
+        stats.get_success, stats.get_fail
+    );
+    println!(
+        "DELETE: {} success / {} fail",
+        stats.delete_success, stats.delete_fail
+    );
+    println!(
+        "RANGE:  {} success / {} fail",
+        stats.range_success, stats.range_fail
+    );
+    println!("Parse errors:           {}", stats.parse_errors);
+    println!("Unknown commands:       {}", stats.unknown_commands);
+
+    Ok(())
+
+    // Time 10,000,000 writes.
 }

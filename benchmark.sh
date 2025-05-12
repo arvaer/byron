@@ -9,9 +9,10 @@ ENTRY_SIZE_BYTES=8   # 8 bytes key + 8 bytes value
 PID=$(pgrep -x byron_server)
 if [ -z "$PID" ]; then
     echo "Byron server not running"
-    exit 1
+    PID=false
+else
+    echo "Profiling byron from server PID=$PID"
 fi
-echo "Profiling byron from server PID=$PID"
 
 if [ $# -lt 1 ]; then
   echo "Usage: $0 <your_command> [args...]"
@@ -58,14 +59,14 @@ iostat -dx 1 > "$IOSTAT_LOG" &
 IOSTAT_PID=$!
 
 # 3.2 eBPF for block I/O counts (requires sudo)
-sudo bpftrace -p "$PID" -e '
+sudo bpftrace ${PID:+-p "$PID"} -e '
   tracepoint:block:block_rq_issue { @[args->rwbs]++ }
 ' > "$BPF_LOG" &
 BPF_PID=$!
 
 # ---- 4) perf stat ----
 echo "Running command under perf stat..."
-perf stat -e cycles,instructions,cache-references,cache-misses -p "$PID"\
+perf stat -e cycles,instructions,cache-references,cache-misses ${PID:+-p "$PID"}\
  -- "${CMD[@]}" \
   2> "$PERF_LOG" \
   > "$CLIENT_OUT"
