@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use lsm::lsm_database::LsmDatabase;
 use tokio::io::{self, AsyncBufReadExt, AsyncReadExt, BufReader};
 
@@ -16,10 +18,10 @@ pub struct WorkloadStats {
     pub unknown_commands: usize,
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread", worker_threads = 32)]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let parent_directory = "./data".to_string();
-    let mut byron = LsmDatabase::new(parent_directory, None);
+    let mut byron = Arc::new(LsmDatabase::new(parent_directory, None));
 
     let file = tokio::fs::File::open("workload.txt".to_string()).await?;
     let reader = BufReader::new(file);
@@ -36,7 +38,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "p" if parts.len() == 3 => {
                 let key = parts[1].parse::<i64>()?;
                 let value = parts[2].parse::<i64>()?;
-                match byron.put(key.to_string(), value.to_string()) {
+                match byron.put(key.to_string(), value.to_string()).await {
                     Ok(_) => stats.put_success += 1,
                     Err(e) => {
                         stats.put_fail += 1;
@@ -57,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Err(_) => stats.parse_errors += 1,
             },
             "d" if parts.len() == 2 => match parts[1].parse::<i64>() {
-                Ok(key) => match  byron.delete(key.to_string()) {
+                Ok(key) => match  byron.delete(key.to_string()).await {
                     Ok(_) => stats.delete_success += 1,
                     Err(e) => {
                         stats.delete_fail += 1;

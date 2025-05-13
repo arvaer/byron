@@ -1,11 +1,13 @@
 pub mod error;
 pub mod mem_table_builder;
+mod skiplist;
 mod vector_mem_table;
 
 use key_value::KeyValue;
 use sstable::{builder::SSTableFeatures, SSTable};
 use std::{path::PathBuf, sync::Arc};
 use vector_mem_table::VectorMemTable;
+use skiplist::CrossBeam;
 
 #[derive(PartialEq, Debug)]
 pub enum RangeResult {
@@ -30,6 +32,8 @@ pub trait MemTableOperations {
 #[derive(Debug)]
 pub enum DataStructure {
     Vector(VectorMemTable),
+    SkipList(CrossBeam)
+
 }
 
 impl Default for DataStructure {
@@ -48,6 +52,7 @@ impl MemTableOperations for MemTable {
         match &mut self.inner {
             //take exclusive reference to self.inner
             DataStructure::Vector(memtable) => memtable.put(key, value),
+            DataStructure::SkipList(memtable) => memtable.put(key, value),
         }
     }
 
@@ -55,6 +60,7 @@ impl MemTableOperations for MemTable {
         match &self.inner {
             //shared reference
             DataStructure::Vector(memtable) => memtable.get(key),
+            DataStructure::SkipList(memtable) => memtable.get(key),
         }
     }
 
@@ -62,18 +68,21 @@ impl MemTableOperations for MemTable {
         match &self.inner {
             //shared reference
             DataStructure::Vector(memtable) => memtable.range(from_m, to_n),
+            DataStructure::SkipList(memtable) => memtable.range(from_m, to_n),
         }
     }
 
     fn at_capacity(&self) -> bool {
         match &self.inner {
             DataStructure::Vector(memtable) => memtable.at_capacity(),
+            DataStructure::SkipList(memtable) => memtable.at_capacity(),
         }
     }
 
     fn current_length(&self) -> usize {
         match &self.inner {
             DataStructure::Vector(memtable) => memtable.current_length(),
+            DataStructure::SkipList(memtable) => memtable.current_length(),
         }
     }
 
@@ -84,6 +93,7 @@ impl MemTableOperations for MemTable {
     ) -> Result<Arc<SSTable>, crate::error::MemTableError> {
         match &mut self.inner {
             DataStructure::Vector(memtable) => memtable.flush(path, table_params),
+            DataStructure::SkipList(memtable) => memtable.flush(path, table_params),
         }
     }
 }

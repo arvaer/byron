@@ -15,7 +15,7 @@ pub struct MemTableBuilder {
 impl Default for MemTableBuilder {
     fn default() -> Self {
         Self {
-            memtable_type: MemTableType::Vector,
+            memtable_type: MemTableType::SkipList,
             max_entries: 1000,
         }
     }

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+crossbeam-skiplist = "0.1.3"
 key_value = { path = "../key_value" }
 sstable = { path = "../sstable"}
 thiserror = "2.0.12"
