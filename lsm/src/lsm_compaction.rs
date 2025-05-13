@@ -150,12 +150,11 @@ impl LsmDatabase {
             let file_name = self
                 .parent_directory
                 .join(format!("sstable-id-{}", Uuid::new_v4()));
-            let level_counts: Vec<usize> = self.levels.iter().map(|lvl| lvl.total_entries).collect();
-            let bits_per_entry = LsmDatabase::allocate_bloom_bits(&level_counts,TOTAL_BLOOM_BUDGET);
-            let fprs:Vec<f64> = bits_per_entry
-                .iter()
-                .map(|&b| 2f64.powf(-b))
-                .collect();
+            let level_counts: Vec<usize> =
+                self.levels.iter().map(|lvl| lvl.total_entries).collect();
+            let bits_per_entry =
+                LsmDatabase::allocate_bloom_bits(&level_counts, TOTAL_BLOOM_BUDGET);
+            let fprs: Vec<f64> = bits_per_entry.iter().map(|&b| 2f64.powf(-b)).collect();
 
             // If Monkey they
             let fpr = fprs[level_number];
@@ -205,6 +204,7 @@ impl LsmDatabase {
                 if let Some(next_kv_result) = iterators[sstable_idx].next() {
                     let next_kv = next_kv_result?;
                     if next_kv.value == "d34db33f" {
+                        // deletion sentinel value
                         continue;
                     }
                     min_heap.push(HeapItem {
