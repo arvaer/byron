@@ -33,17 +33,43 @@ impl PartialOrd for HeapItem {
         Some(self.cmp(other))
     }
 }
+const TOTAL_BLOOM_BUDGET: usize = 1_000_000;
 
-pub trait Monkey {
-    fn extend(&mut self, from: usize) -> Result<(), LsmError>;
-    fn insert_new_table(
-        &mut self,
-        incoming_table: Arc<SSTable>,
-        level_number: usize,
-    ) -> Result<(), LsmError>;
-}
+impl LsmDatabase {
+    /// this implements the monkey‐paper solution:
+    ///   argmin(∑ exp(−b_i·ln2))
+    ///   =>  ∑ n_i·b_i = M
+    ///
+    /// The closed‐form is:
+    ///   b_i = (M/N) + (∑ n_j·log2(n_j))/N  − log2(n_i)
+    pub fn allocate_bloom_bits(level_counts: &[usize], total_bits: usize) -> Vec<f64> {
+        // 1. Convert to f64 and sum total entries N
+        let n: Vec<f64> = level_counts.iter().map(|&c| c as f64).collect();
+        let n_sum: f64 = n.iter().sum();
+        assert!(n_sum > 0.0, "Must have at least one entry across levels");
 
-impl Monkey for LsmDatabase {
+        // 2. compute ∑ n_j·log2(n_j)
+        let sum_n_log: f64 = n.iter().map(|&ni| ni * ni.log2()).sum();
+
+        let m_over_n_sum = (total_bits as f64) / n_sum;
+        let avg_log = sum_n_log / n_sum;
+
+        // 4. compute b_i = (m/n) + avg_log − log2(n_i)
+        n.iter()
+            .map(|&ni| {
+                // if ni is zero, treat log2(ni) → 0 and clamp
+                if ni <= 1.0 {
+                    // With 0 or 1 entry, best you can do is allocate at least 1 bit
+                    f64::max(m_over_n_sum + avg_log, 1.0)
+                } else {
+                    let bi = m_over_n_sum + avg_log - ni.log2();
+                    // bits-per-entry must be non-negative
+                    f64::max(bi, 0.0)
+                }
+            })
+            .collect()
+    }
+
     fn extend(&mut self, from: usize) -> Result<(), LsmError> {
         log::info!("Extending from level {}", from);
         if self.levels.is_empty() {
@@ -65,7 +91,8 @@ impl Monkey for LsmDatabase {
         self.levels.push(new_level);
         Ok(())
     }
-    fn insert_new_table(
+
+    pub fn insert_new_table(
         &mut self,
         incoming_table: Arc<SSTable>,
         level_number: usize,
@@ -123,7 +150,16 @@ impl Monkey for LsmDatabase {
             let file_name = self
                 .parent_directory
                 .join(format!("sstable-id-{}", Uuid::new_v4()));
-            let fpr = self.levels[level_number].width as f64 * self.base_fpr;
+            let level_counts: Vec<usize> = self.levels.iter().map(|lvl| lvl.total_entries).collect();
+            let bits_per_entry = LsmDatabase::allocate_bloom_bits(&level_counts,TOTAL_BLOOM_BUDGET);
+            let fprs:Vec<f64> = bits_per_entry
+                .iter()
+                .map(|&b| 2f64.powf(-b))
+                .collect();
+
+            // If Monkey they
+            let fpr = fprs[level_number];
+            //let fpr = self.levels[level_number].width as f64 * self.base_fpr;
             let total_entries = self.levels[level_number].total_entries;
             log::info!(
                 "Step 5.1: Creating new table with fpr {} and {} entries",

@@ -14,6 +14,10 @@ members = [
   "memtable",
   "sstable",
 ]
-default-members = ["byron"]
+
+[dependencies]
+rand = "0.9.1"
+tokio = { version = "1.0", features = ["full"] }
+lsm = {path = "./lsm"}
 
 

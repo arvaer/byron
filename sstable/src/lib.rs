@@ -106,7 +106,7 @@ impl SSTable {
             return Ok(kvp);
         }
 
-        let kvp: Arc<KeyValue> = match self.linear_search(block_data, key.clone(), &restart_points)
+        let kvp: Arc<KeyValue> = match self.binary_search(block_data, key.clone(), &restart_points)
         {
             Ok(key) => Arc::new(key),
             Err(SSTableError::KVPexceedsBlock(e)) => {
@@ -434,13 +434,11 @@ impl SSTable {
         // Handle empty restart points
         if restart_points.is_empty() {
             log::info!("DEBUG: No restart points available");
-            return Err(SSTableError::KeyNotfound);
+            return self.linear_search(block_data, key, restart_points);
         }
 
         let mut left = 0;
         let mut right = restart_points.len();
-
-
 
         while left < right {
             let mid = left + (right - left) / 2;
@@ -494,7 +492,7 @@ impl SSTable {
                 left = mid + 1;
             }
         }
-        Err(SSTableError::KeyNotfound)
+        self.linear_search(block_data, key, restart_points)
     }
 
     pub fn iter_block(
@@ -509,10 +507,7 @@ impl SSTable {
         SSTableIterator::new(self)
     }
 
-    pub fn get_until(
-        &self,
-        to_key: &str,
-    ) -> Result<(Vec<Box<KeyValue>>, bool), SSTableError> {
+    pub fn get_until(&self, to_key: &str) -> Result<(Vec<Box<KeyValue>>, bool), SSTableError> {
         let mut result = Vec::new();
         let mut found = false;
 
@@ -934,7 +929,6 @@ mod tests {
         }
 
         for (key, value) in sorted.into_iter() {
-
             builder.add_from_kv(create_test_kv(&key, &value))?;
         }
 
@@ -1100,7 +1094,6 @@ mod tests {
             sorted.insert(key, value.clone());
         }
         for (key, value) in sorted.into_iter() {
-
             builder.add_from_kv(create_test_kv(&key, &value))?;
         }
 

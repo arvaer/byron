@@ -1,4 +1,3 @@
-use crate::lsm_compaction::Monkey;
 use key_value::KeyValue;
 use memtable::{mem_table_builder::MemTableBuilder, MemTable, MemTableOperations};
 use sstable::{builder::SSTableFeatures, error::SSTableError, SSTable};
@@ -76,7 +75,7 @@ impl LsmDatabase {
     pub fn calculate_sstable_features(&self, item_count: usize) -> SSTableFeatures {
         SSTableFeatures {
             item_count,
-            fpr: 0.01,
+            fpr: 0.016,
         }
     }
 

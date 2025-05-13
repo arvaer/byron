@@ -1,6 +1,4 @@
-use lsm::{lsm_compaction::Monkey, lsm_database::LsmDatabase};
-use rand::Rng;
-use std::time::Instant;
+use lsm::lsm_database::LsmDatabase;
 use tokio::io::{self, AsyncBufReadExt, AsyncReadExt, BufReader};
 
 #[derive(Default, Debug)]
