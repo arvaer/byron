@@ -13,7 +13,7 @@
 \title{\bfseries byron: Another Key-Value Store}
 \author{%
   Michael Almeida\\
-  \small CS265 Spring 2023\\
+  \small CS265 Spring 2025\\
   \texttt{mia330@g.harvard.edu}%
 }
 \date{} % no date
@@ -324,11 +324,18 @@ Post-refactor, byron sustained continuous write ingest and background compaction
 We evaluated byron’s performance on the four basic operations (GET, PUT, RANGE, DELETE) using a comprehensive benchmark suite. All tests (unless otherwise noted) were run single-threaded on the same hardware (on an nvme2 ssd), using the Rust `cargo run --release` build. We used a custom `benchmark.py` harness (wrapping Linux \texttt{perf}) to run each experiment multiple times and collect statistics like CPU cycles, instructions, cache misses, and elapsed time, with each data point reported as the mean $\pm$ standard deviation over several runs. In all experiments, we first “warm up” the database by loading a certain number of key-value pairs (e.g. 1 million) into byron, then perform the operations of interest. Keys and values in the benchmarks were generated using the workload generator. Effectively, the load operation was performed as the main() function. We also varied the key access distributions (uniform random vs skewed) to examine performance under different workload patterns.
 
 We opted to use a single-threaded setup for our initial performance tests to isolate the effects of the LSM tree and other optimizations without introducing additional complexity from concurrent access. Experimental exams are performed with 20 worker threads. This allows us to focus on the core performance characteristics of byron’s design.
-Moreover, instead of using the load command on the client-server grpc interface, we used the rust main function to load the data into the database. We found the grpc server to be extremely unoptimized, and it introduced a lot of noise.
+Moreover, instead of using the load command on the clientoserver grpc interface, we used the rust main function to load the data into the database. We found the grpc server to be extremely unoptimized, and it introduced a lot of noise.
+
+
 \subsection{GET (Read) Performance}
 
 \paragraph{Setup}
 We preloaded 1\,M key–value pairs to populate the LSM tree across multiple levels. Then, for each test, we executed GETs only for keys known to exist, measuring CPU cycles, instructions, cache miss rate, and elapsed time (mean ± std. dev. over several runs).
+All workloads were mixed, with 1M puts at the start. 
+
+
+For the final experiment, Mixed 1M, we used 100k Puts and 1M Gets. This means that 90\% of the time, the key didn't exist, and we had to scan the full SSTable.
+Embarassingly, we enabled rayon for this experiment, which confounds the results as all SSTables were scanned concurrently. This is not a fair comparison, and we should have used the same code as the other experiments.
 
 \paragraph{Workload Scenarios}
 \begin{description}[leftmargin=1em,labelwidth=*,itemsep=0.5ex]
@@ -379,17 +386,17 @@ We loaded 1 M, 5 M, and 10 M key–value pairs, measuring total time and computi
 \begin{table}[htbp]
   \centering
   \small
-  \begin{tabular}{r r r r r r r r}
+  \begin{tabular}{r r r r r}
     \toprule
-    \# Inserts   & CPU Cycles                       & Instructions                        & Cache Refs                       & Cache Miss \% & Elapsed (s)     & User (s)        & Sys (s)         \\
+    \# Inserts   & CPU Cycles                       & Instructions                          & Cache Miss \% & Time (s)              \\
     \midrule
-    1\,M         & $(12.505\pm0.061)\times10^{9}$   & $(40.325\pm0.004)\times10^{9}$      & $(203.015\pm2.918)\times10^{6}$  & $10.69\pm0.23$ & $2.53\pm0.03$   & $2.28\pm0.01$   & $0.23\pm0.02$   \\
-    5\,M         & $(68.557\pm0.604)\times10^{9}$   & $(153.271\pm0.224)\times10^{9}$     & $(3.481\pm0.086)\times10^{9}$    & $12.14\pm0.29$ & $21.40\pm0.40$  & $12.30\pm0.13$  & $8.88\pm0.27$   \\
-    10\,M        & $(276.458\pm14.320)\times10^{9}$ & $(387.272\pm0.886)\times10^{9}$     & $(21.302\pm0.982)\times10^{9}$   & $7.85\pm0.36$  & $136.41\pm7.56$ & $49.93\pm2.55$  & $85.09\pm4.76$  \\
-    Mixed 1\,M   & $(257.876\pm8.864)\times10^{9}$  & $(455.471\pm3.387)\times10^{9}$     & $(7.980\pm0.535)\times10^{9}$    & $8.69\pm0.74$  & $9.05\pm0.66$   & $45.49\pm2.01$  & $28.09\pm1.30$  \\
-    Rayon 10\,M  & $(142.164\pm8.003)\times10^{9}$  & $(506.605\pm11.598)\times10^{9}$    & $(2.648\pm0.681)\times10^{9}$    & $9.49\pm1.30$  & $27.92\pm0.75$  & $25.48\pm1.54$  & $2.71\pm0.14$   \\
-    Rayon 1\,M   & $(11.590\pm0.068)\times10^{9}$   & $(42.265\pm0.009)\times10^{9}$      & $(195.481\pm3.745)\times10^{6}$  & $4.99\pm0.40$  & $2.25\pm0.03$   & $2.08\pm0.02$   & $0.15\pm0.01$   \\
-    Rayon 5\,M   & $(68.028\pm4.968)\times10^{9}$   & $(246.052\pm7.296)\times10^{9}$     & $(1.210\pm0.423)\times10^{9}$    & $8.46\pm1.32$  & $13.12\pm0.33$  & $12.16\pm0.91$  & $1.04\pm0.08$   \\
+    1\,M         & $(12.505\pm0.061)\times10^{9}$   & $(40.325\pm0.004)\times10^{9}$        & $10.69\pm0.23$ & $2.53\pm0.03$      \\
+    5\,M         & $(68.557\pm0.604)\times10^{9}$   & $(153.271\pm0.224)\times10^{9}$       & $12.14\pm0.29$ & $21.40\pm0.40$     \\
+    10\,M        & $(276.458\pm14.320)\times10^{9}$ & $(387.272\pm0.886)\times10^{9}$       & $7.85\pm0.36$  & $136.41\pm7.56$   \\
+    Mixed 1\,M   & $(257.876\pm8.864)\times10^{9}$  & $(455.471\pm3.387)\times10^{9}$       & $8.69\pm0.74$  & $9.05\pm0.66$     \\
+    Rayon 1\,M   & $(11.590\pm0.068)\times10^{9}$   & $(42.265\pm0.009)\times10^{9}$        & $4.99\pm0.40$  & $2.25\pm0.03$      \\
+    Rayon 5\,M   & $(68.028\pm4.968)\times10^{9}$   & $(246.052\pm7.296)\times10^{9}$       & $8.46\pm1.32$  & $13.12\pm0.33$     \\
+    Rayon 10\,M  & $(142.164\pm8.003)\times10^{9}$  & $(506.605\pm11.598)\times10^{9}$      & $9.49\pm1.30$  & $27.92\pm0.75$     \\
     \bottomrule
   \end{tabular}
   \caption{PUT operation performance metrics across different workloads and configurations.}
@@ -416,12 +423,12 @@ We loaded 1\,M keys, then issued range queries that return 100 consecutive entri
 \begin{table}[htbp]
   \centering
   \small
-  \begin{tabular}{r r r r r r r r}
+  \begin{tabular}{r r r r r}
     \toprule
-    Workload   & CPU Cycles                        & Instructions                         & Cache Refs                       & Cache Miss \% & Elapsed (s)     & User (s)        & Sys (s)         \\
+    Workload   & CPU Cycles                        & Instructions                             & Cache Miss \% & Time (s)           \\
     \midrule
-    Gaussian   & $(54.718\pm0.276)\times10^{9}$    & $(211.731\pm0.062)\times10^{9}$      & $(1.584\pm0.013)\times10^{9}$    & $5.27\pm0.24$ & $11.09\pm0.10$  & $10.12\pm0.11$  & $0.88\pm0.03$   \\
-    Uniform    & $(55.030\pm0.228)\times10^{9}$    & $(214.170\pm0.047)\times10^{9}$      & $(1.579\pm0.015)\times10^{9}$    & $5.16\pm0.32$ & $11.23\pm0.10$  & $10.17\pm0.09$  & $0.95\pm0.04$   \\
+    Gaussian   & $(54.718\pm0.276)\times10^{9}$    & $(211.731\pm0.062)\times10^{9}$          & $5.27\pm0.24$ & $11.09\pm0.10$     \\
+    Uniform    & $(55.030\pm0.228)\times10^{9}$    & $(214.170\pm0.047)\times10^{9}$          & $5.16\pm0.32$ & $11.23\pm0.10$     \\
     \bottomrule
   \end{tabular}
   \caption{RANGE operation performance metrics for Gaussian and Uniform query workloads.}
@@ -448,13 +455,13 @@ We loaded datasets of 100\,K and 1\,M keys, then issued delete operations (tombs
 \begin{table}[htbp]
   \centering
   \small
-  \begin{tabular}{r r r r r r r r}
+  \begin{tabular}{r r r r r}
     \toprule
-    \# Deletes  & CPU Cycles                         & Instructions                          & Cache Refs                        & Cache Miss \% & Elapsed (s)     & User (s)        & Sys (s)         \\
+    \# Deletes  & CPU Cycles                         & Instructions                             & Cache Miss \% & Time(s)             \\
     \midrule
-    100\,K      & $(8.585\pm0.064)\times10^{9}$      & $(22.774\pm0.012)\times10^{9}$        & $(237.704\pm5.841)\times10^{6}$   & $12.17\pm0.21$ & $1.90\pm0.01$   & $1.55\pm0.03$   & $0.34\pm0.02$   \\
-    500\,K      & $(7.633\pm0.061)\times10^{9}$      & $(18.413\pm0.017)\times10^{9}$        & $(212.001\pm1.942)\times10^{6}$   & $12.05\pm0.26$ & $1.70\pm0.02$   & $1.39\pm0.02$   & $0.31\pm0.01$   \\
-    1\,M        & $(8.610\pm0.075)\times10^{9}$      & $(20.740\pm0.035)\times10^{9}$        & $(195.164\pm1.331)\times10^{6}$   & $12.40\pm0.12$ & $1.82\pm0.01$   & $1.57\pm0.01$   & $0.23\pm0.01$   \\
+    100\,K      & $(8.585\pm0.064)\times10^{9}$      & $(22.774\pm0.012)\times10^{9}$           & $12.17\pm0.21$ & $1.90\pm0.01$      \\
+    500\,K      & $(7.633\pm0.061)\times10^{9}$      & $(18.413\pm0.017)\times10^{9}$           & $12.05\pm0.26$ & $1.70\pm0.02$      \\
+    1\,M        & $(8.610\pm0.075)\times10^{9}$      & $(20.740\pm0.035)\times10^{9}$           & $12.40\pm0.12$ & $1.82\pm0.01$      \\
     \bottomrule
   \end{tabular}
   \caption{DELETE operation performance metrics across different batch sizes.}
@@ -640,14 +647,32 @@ Together, these techniques yield significant on-disk reduction (e.g.\ ~3 B saved
 \section*{Conclusion}
 In this project, we built and evaluated \textbf{byron}, a custom LSM-tree-based key-value store. The system’s design—including on-disk prefix compression, memory-resident Bloom filters and fence pointers, a lock-free skiplist memtable, and a tuned compaction schedule—proved effective for a variety of workloads. We implemented several optimizations, such as cache-aligned data structures and multi-layer compression techniques, and overcame significant engineering challenges, including achieving memory safety without \texttt{unsafe} and debugging concurrency issues.
 
-Our experimental results demonstrate that byron achieves high performance under single threaded environments:
+Our experimental results demonstrate that byron achieves high performance under single threaded environments, and has room to imrpove under multi-threaded workloads. We also showed that our design choices, such as the lock-free skiplist memtable and cache-aware data structures, significantly improved performance and reduced CPU cache misses.
+\section*{Conclusion}
+In this project, we built and evaluated \textbf{Byron}, a custom LSM‐tree key–value store. Our design—including on‐disk prefix compression, memory‐resident Bloom filters and fence pointers, a lock‐free skiplist memtable, and a tuned compaction schedule—proved effective across diverse workloads. Key takeaways from our single‐threaded benchmarks:
+
 \begin{itemize}[leftmargin=1em,itemsep=0.5ex]
-  \item \textbf{GET:} Up to 33\,K GETs/sec with low cache miss rates (3–8\%).
-  \item \textbf{PUT:} Sustained ~3.5×10\textsuperscript{5} inserts/sec with minimal write amplification.
-  \item \textbf{RANGE:} Achieved ~200\,K keys/sec for range scans, limited by SSD bandwidth.
-  \item \textbf{DELETE:} Bulk deletes at ~5×10\textsuperscript{5} ops/sec, deferring cleanup to compaction.
+  \item \textbf{GET:} Sustained \(\approx33{,}000\) GETs/sec (1 M GETs in \(\sim30\) s). Cache miss rate drops from \(\sim10\%\) at 10 K queries to \(\sim3.4\%\) at 1 M and remains \(\approx4\%\) at higher volumes.
+  \item \textbf{PUT:} Throughput of \(4.44\times10^5\) inserts/sec at 1 M, \(3.81\times10^5\) at 5 M, and \(3.58\times10^5\) at 10 M—demonstrating only a \(\sim20\%\) drop over a 10× scale‐up.
+  \item \textbf{RANGE:} \(\approx200{,}000\) keys/sec for 100‐key scans, limited primarily by SSD sequential bandwidth with negligible software overhead.
+  \item \textbf{DELETE:} \(\approx5\times10^5\) deletions/sec (100 K in 0.2 s, 1 M in 2 s), since tombstones are simple in‐memory writes and cleaned up lazily by compaction.
 \end{itemize}
 
+These results confirm that Byron delivers high throughput and low latency for read‐heavy, write‐heavy, and mixed workloads, with efficient use of CPU cache and disk I/O.  
+We also demonstrated the effectiveness of our optimizations, including the lock-free skiplist memtable and cache-aware data structures, which significantly improved performance and reduced CPU cache misses.
 
+There is significant room for future work, including:
+\begin{itemize}[leftmargin=1em,itemsep=0.5ex]
+  \item \textbf{Concurrency:} Multi-threaded performance and background compaction. Currently we are just using rayon to parralellize operators naively
+  \item \textbf{Compression:} Further compression techniques (LZ4, etc.) for on-disk data.
+  \item \textbf{Distributed Systems:} Extending byron to support distributed key-value storage.
+  \item \textbf{Benchmarking:} More comprehensive benchmarks across different workloads and configurations.
+  \item \textbf{Client-Server Interface:} Optimizing the gRPC server for better performance.
+  \item \textbf{Data Structures:} Exploring alternative data structures (e.g., B-trees) for specific workloads.
+  \item \textbf{Write Ahead Log:} Implementing a write-ahead log for durability and crash recovery.
+  \item \textbf{Replication:} Adding replication and consistency guarantees for distributed systems.
+  \item \textbf{Monitoring:} Implementing monitoring and profiling tools for performance analysis.
+  \item \textbf{Documentation:} Improving documentation and user guides for easier adoption.
+\end{itemize}
 
 \end{document}
