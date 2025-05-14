@@ -132,7 +132,7 @@ impl LsmDatabase {
             let compaction_start = std::time::Instant::now();
 
             match self.insert_new_table(sstable, 0).await {
-                Ok(_) => println!("Compaction completed in {:?}", compaction_start.elapsed()),
+                Ok(_) => log::info!("Compaction completed in {:?}", compaction_start.elapsed()),
                 Err(e) => {
                     log::error!("Compaction error: {:?}", e);
                     return Err(e);

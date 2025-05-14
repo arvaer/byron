@@ -277,7 +277,7 @@ impl LsmDatabase {
                 // Delete the old tables from disk
                 for table in &levels[level_number].inner {
                     if let Err(e) = table.delete() {
-                        elog::info!("Warning: Failed to delete table: {:?}", e);
+                        log::error!("Warning: Failed to delete table: {:?}", e);
                     }
                 }
                 levels[level_number].inner.clear();
