@@ -36,8 +36,8 @@ impl MemTableOperations for VectorMemTable {
     fn put(&mut self, key: String, value: String) {
         self.data.push(KeyValue { key, value })
     }
-    fn insert(&self, key: String, value: String) {
-        todo!();
+    fn insert(&self, _key: String, _value: String) {
+        todo!()
     }
 
     fn get(&self, key: &str) -> Option<Box<KeyValue>> {

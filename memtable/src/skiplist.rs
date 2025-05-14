@@ -2,7 +2,7 @@ use crate::{MemTableOperations, RangeResult};
 use crossbeam_skiplist::SkipMap;
 use key_value::KeyValue;
 use sstable::{
-    builder::{SSTableBuilder, SSTableFeatures}, streamed_builder::StreamedSSTableBuilder, SSTable
+    builder::SSTableFeatures, streamed_builder::StreamedSSTableBuilder, SSTable
 };
 use std::{path::PathBuf, sync::Arc};
 

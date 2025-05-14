@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use lsm::lsm_database::LsmDatabase;
-use tokio::io::{self, AsyncBufReadExt, AsyncReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, BufReader};
 
 #[derive(Default, Debug)]
 pub struct WorkloadStats {
@@ -22,7 +22,6 @@ pub struct WorkloadStats {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let parent_directory = "./data".to_string();
     let byron = Arc::new(LsmDatabase::new(parent_directory, None));
-    let mut count = 0;
 
     let file = tokio::fs::File::open("workload.txt".to_string()).await?;
     let reader = BufReader::new(file);
@@ -37,7 +36,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         match parts[0] {
             "p" if parts.len() == 3 => {
-        count += 1;
                 let key = parts[1].parse::<i64>()?;
                 let value = parts[2].parse::<i64>()?;
                 match byron.put(key.to_string(), value.to_string()).await {

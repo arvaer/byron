@@ -1,11 +1,8 @@
-use arc_swap::ArcSwap;
 use key_value::KeyValue;
 use memtable::{mem_table_builder::MemTableBuilder, MemTable, MemTableOperations};
 use rayon::prelude::*;
 use sstable::{builder::SSTableFeatures, error::SSTableError, SSTable};
-use std::collections::HashMap;
 use std::{path::PathBuf, sync::Arc};
-use tokio::runtime::Runtime;
 use tokio::sync::{Mutex, RwLock};
 use tokio::task;
 use uuid::Uuid;

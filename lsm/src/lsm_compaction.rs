@@ -34,7 +34,6 @@ impl PartialOrd for HeapItem {
         Some(self.cmp(other))
     }
 }
-const TOTAL_BLOOM_BUDGET: usize = 10 * 10_000_000;
 
 impl LsmDatabase {
     /// this implements the monkey‐paper solution:
@@ -67,7 +66,7 @@ impl LsmDatabase {
 
                 // fpr_i = 2^(−b_i), but clamp so we never ask for an invalid rate
                 let fpr = 2f64.powf(-raw_b);
-                fpr.max(0.001).min(0.999)
+                fpr.clamp(0.001,0.999)
             })
             .collect()
     }
@@ -166,14 +165,10 @@ impl LsmDatabase {
                 .join(format!("sstable-id-{}", Uuid::new_v4()));
             let level_counts: Vec<usize>;
             let tables_to_compact: Vec<Arc<SSTable>>;
-            let total_entries;
-
-            // Get all data while holding the read lock
             {
                 let levels = self.levels.read().await;
                 level_counts = levels.iter().map(|lvl| lvl.total_entries).collect();
                 tables_to_compact = levels[level_number].inner.clone();
-                total_entries = levels[level_number].total_entries;
             }
 
             // Calculate bloom filter parameters
