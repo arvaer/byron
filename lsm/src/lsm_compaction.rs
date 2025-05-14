@@ -78,7 +78,7 @@ impl LsmDatabase {
     ) -> Result<(), LsmError> {
         // Use a loop instead of recursion for moving tables up levels
         loop {
-            println!(
+            log::info!(
                 "Step 1: Inserting table with {} entries into level {}",
                 incoming_table.actual_item_count, level_number
             );
@@ -89,17 +89,17 @@ impl LsmDatabase {
                 let levels = self.levels.read().await;
                 if level_number >= levels.len() {
                     drop(levels); // Release read lock before getting write lock
-                    println!(
+                    log::info!(
                         "Step 2: Level {} does not exist. Extending database...",
                         level_number
                     );
                     final_level_flag = true;
                     self.extend(level_number).await?;
 
-                    println!("Step 2.1: New level layout:");
+                    log::info!("Step 2.1: New level layout:");
                     let levels = self.levels.read().await;
                     for (i, level) in levels.iter().enumerate() {
-                        println!(
+                        log::info!(
                             "  Level {}: {} tables, width {}, depth {}",
                             i,
                             level.inner.len(),
@@ -111,13 +111,13 @@ impl LsmDatabase {
             }
 
             // Step 2: Add table to the level
-            println!("Step 3: Adding table to level {}", level_number);
+            log::info!("Step 3: Adding table to level {}", level_number);
             {
                 let mut levels = self.levels.write().await;
                 let level = &mut levels[level_number];
                 level.inner.push(incoming_table.clone());
                 level.total_entries += incoming_table.actual_item_count;
-                println!(
+                log::info!(
                     "Step 3.1: Level {} now has {} tables with {} total entries",
                     level_number,
                     level.inner.len(),
@@ -142,14 +142,14 @@ impl LsmDatabase {
                 };
 
                 let will_compact = level.inner.len() >= threshold;
-                println!("Step 4: Checking compaction for level {}: {} tables (threshold {}), compaction needed: {}",
+                log::info!("Step 4: Checking compaction for level {}: {} tables (threshold {}), compaction needed: {}",
                  level_number, level.inner.len(), threshold, will_compact);
                 will_compact
             };
 
             // If no compaction needed, we're done
             if !needs_compaction {
-                println!(
+                log::info!(
                     "No compaction needed for level {}, we're done",
                     level_number
                 );
@@ -157,7 +157,7 @@ impl LsmDatabase {
             }
 
             // Step 4: Perform compaction if needed
-            println!("Step 5: Starting compaction for level {}", level_number);
+            log::info!("Step 5: Starting compaction for level {}", level_number);
 
             // Gather all necessary data before spawning the blocking task
             let file_name = self
@@ -174,9 +174,9 @@ impl LsmDatabase {
             // Calculate bloom filter parameters
             let total_entries: usize = level_counts.iter().sum();
             let fprs = LsmDatabase::allocate_bloom_fprs(&level_counts, total_entries*10);
-            println!("fprs: {:?}", fprs);
+            log::info!("fprs: {:?}", fprs);
             let fpr = fprs.get(level_number).cloned().unwrap_or(self.base_fpr);
-            println!(
+            log::info!(
                 "Step 5.1: Creating new table with fpr {} and {} entries",
                 fpr, total_entries
             );
@@ -189,7 +189,7 @@ impl LsmDatabase {
             // Use task::spawn_blocking for CPU-intensive compaction
             let compacted_table =
                 task::spawn_blocking(move || -> Result<Arc<SSTable>, LsmError> {
-                    println!("Inside compaction task for level {}", level_number);
+                    log::info!("Inside compaction task for level {}", level_number);
 
                     // Create iterators for all tables
                     let mut iterators: Vec<_> =
@@ -209,7 +209,7 @@ impl LsmDatabase {
                             });
                         }
                     }
-                    println!(
+                    log::info!(
                         "Step 5.2: Initialized min heap with {} items",
                         min_heap.len()
                     );
@@ -248,7 +248,7 @@ impl LsmDatabase {
                             });
                         }
                     }
-                    println!(
+                    log::info!(
                         "Step 5.3: Processed {} items during compaction",
                         items_processed
                     );
@@ -256,8 +256,8 @@ impl LsmDatabase {
                     // Finalize the new table
                     match new_table.finalize() {
                         Ok(table) => {
-                            println!("Finalizing compacted SSTable");
-                            println!("Finalized compacted SSTable");
+                            log::info!("Finalizing compacted SSTable");
+                            log::info!("Finalized compacted SSTable");
                             Ok(table)
                         }
                         Err(e) => Err(LsmError::SSTable(e)),
@@ -266,7 +266,7 @@ impl LsmDatabase {
                 .await
                 .unwrap()?;
 
-            println!(
+            log::info!(
                 "Step 5.4: Finalized new table with {} entries",
                 compacted_table.actual_item_count
             );
@@ -277,16 +277,16 @@ impl LsmDatabase {
                 // Delete the old tables from disk
                 for table in &levels[level_number].inner {
                     if let Err(e) = table.delete() {
-                        eprintln!("Warning: Failed to delete table: {:?}", e);
+                        elog::info!("Warning: Failed to delete table: {:?}", e);
                     }
                 }
                 levels[level_number].inner.clear();
                 levels[level_number].total_entries = 0;
-                println!("Step 5.5: Cleared level {}", level_number);
+                log::info!("Step 5.5: Cleared level {}", level_number);
             }
 
             // Instead of recursion, update the loop variables and continue
-            println!("Step 5.6: Moving to next level: {}", level_number + 1);
+            log::info!("Step 5.6: Moving to next level: {}", level_number + 1);
             incoming_table = compacted_table;
             level_number += 1;
 
@@ -296,7 +296,7 @@ impl LsmDatabase {
 
     // Also update the extend method to be async
     pub async fn extend(&self, target_level: usize) -> Result<(), LsmError> {
-        println!(
+        log::info!(
             "Extending levels from {} to {}",
             self.levels.read().await.len(),
             target_level + 1
@@ -319,7 +319,7 @@ impl LsmDatabase {
                 total_entries: 0,
             };
 
-            println!(
+            log::info!(
                 "Adding new level with width {} and depth {}",
                 new_width,
                 levels.len()
@@ -327,7 +327,7 @@ impl LsmDatabase {
             levels.push(new_level);
         }
 
-        println!("Extended levels, now have {} levels", levels.len());
+        log::info!("Extended levels, now have {} levels", levels.len());
         Ok(())
     }
 }

@@ -134,7 +134,7 @@ impl LsmDatabase {
             match self.insert_new_table(sstable, 0).await {
                 Ok(_) => println!("Compaction completed in {:?}", compaction_start.elapsed()),
                 Err(e) => {
-                    eprintln!("Compaction error: {:?}", e);
+                    log::error!("Compaction error: {:?}", e);
                     return Err(e);
                 }
             }
@@ -143,7 +143,7 @@ impl LsmDatabase {
                 memtables.retain(|(id, _)| id != &full_id);
 
             } else {
-                eprintln!("Warning: Couldn't get lock to remove memtable {}", full_id);
+                log::error!("Warning: Couldn't get lock to remove memtable {}", full_id);
             }
 
         };
