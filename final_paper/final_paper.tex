@@ -637,29 +637,17 @@ Thus \(\sim60\%\) of lookups hit in \(O(1)\); the remainder incur an \(O(\log R)
 
 Together, these techniques yield significant on-disk reduction (e.g.\ ~3 B saved per 16 B key) with minimal CPU overhead.
 
+\section*{Conclusion}
+In this project, we built and evaluated \textbf{byron}, a custom LSM-tree-based key-value store. The system’s design—including on-disk prefix compression, memory-resident Bloom filters and fence pointers, a lock-free skiplist memtable, and a tuned compaction schedule—proved effective for a variety of workloads. We implemented several optimizations, such as cache-aligned data structures and multi-layer compression techniques, and overcame significant engineering challenges, including achieving memory safety without \texttt{unsafe} and debugging concurrency issues.
+
+Our experimental results demonstrate that byron achieves high performance under single threaded environments:
+\begin{itemize}[leftmargin=1em,itemsep=0.5ex]
+  \item \textbf{GET:} Up to 33\,K GETs/sec with low cache miss rates (3–8\%).
+  \item \textbf{PUT:} Sustained ~3.5×10\textsuperscript{5} inserts/sec with minimal write amplification.
+  \item \textbf{RANGE:} Achieved ~200\,K keys/sec for range scans, limited by SSD bandwidth.
+  \item \textbf{DELETE:} Bulk deletes at ~5×10\textsuperscript{5} ops/sec, deferring cleanup to compaction.
+\end{itemize}
 
 
-\section{Performance Analysis of Different Workloads}
-Finally, we evaluated byron under mixed workloads representative of different real-world use cases: read-intensive, write-intensive, and balanced. Our goal was to observe how the system handles the interplay of reads, writes, and compactions when they occur together.
-
-
-
-\paragraph{Workload Scenarios}
-We defined three workload scenarios to evaluate byron’s performance under different read/write ratios:
-- Read 90\% GET 10\% PUT
-- Write 10\% GET 90\% PUT
-- Mixed 50\% GET 50\% PUT
-
-
-\section\*{Conclusion}
-In this project, we built and evaluated \textbf{byron}, a custom LSM-tree based key-value store. The system’s design — including on-disk prefix compression, memory-resident Bloom filters and fence pointers, a lock-free skiplist memtable, and a tuned compaction schedule — proved effective for a variety of workloads. We implemented several optimizations (cache-aligned data structures, multi-layer compression techniques, etc.) and overcame significant engineering challenges (achieving memory safety without `unsafe`, debugging concurrency issues).
-
-Our experimental results demonstrate that byron achieves high performance:
-
-* Write throughput scales nearly linearly and greatly benefits from the skiplist memtable (with a 5× improvement over the initial design at high volumes).
-* Read operations are fast, often requiring no disk access thanks to Bloom filters and indexing, and scale linearly with load.
-* Mixed workloads are handled gracefully via our concurrency design, and the system maintains efficiency across different read/write ratios.
-
-In summary, byron provides a compelling trade-off for write-intensive applications without sacrificing read efficiency, making it a robust solution as a write-optimized, latch-free key-value store.
 
 \end{document}
