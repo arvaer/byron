@@ -9,6 +9,9 @@ use uuid::Uuid;
 
 use crate::error::LsmError;
 
+
+
+
 #[derive(Debug)]
 pub struct Level {
     pub inner: Vec<Arc<SSTable>>,
@@ -19,13 +22,12 @@ pub struct Level {
 
 #[derive(Debug)]
 pub struct LsmDatabase {
-    // Vector of memtables, newest first (at index 0)
     pub memtables: Arc<Mutex<Vec<(Uuid, Arc<MemTable>)>>>,
     pub levels: Arc<RwLock<Vec<Level>>>,
     pub parent_directory: PathBuf,
     pub capacity_expansion_factor: f64,
     pub base_fpr: f64,
-    pub max_memtables: usize, // Limit total memtables to control memory usage
+    pub max_memtables: usize,
 }
 
 impl LsmDatabase {
@@ -51,7 +53,7 @@ impl LsmDatabase {
         }
     }
 
-    // Flash a specific memtable to SSTable
+
     pub async fn flash_memtable(
         parent_dir: PathBuf,
         memtable: Arc<MemTable>,

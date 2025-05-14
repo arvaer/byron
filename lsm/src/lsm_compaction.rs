@@ -76,7 +76,6 @@ impl LsmDatabase {
         mut incoming_table: Arc<SSTable>,
         mut level_number: usize,
     ) -> Result<(), LsmError> {
-        // Use a loop instead of recursion for moving tables up levels
         loop {
             log::info!(
                 "Step 1: Inserting table with {} entries into level {}",
@@ -186,7 +185,6 @@ impl LsmDatabase {
                 item_count: total_entries,
             };
 
-            // Use task::spawn_blocking for CPU-intensive compaction
             let compacted_table =
                 task::spawn_blocking(move || -> Result<Arc<SSTable>, LsmError> {
                     log::info!("Inside compaction task for level {}", level_number);
@@ -290,11 +288,9 @@ impl LsmDatabase {
             incoming_table = compacted_table;
             level_number += 1;
 
-            // The loop will now iterate with the new table at the new level
         }
     }
 
-    // Also update the extend method to be async
     pub async fn extend(&self, target_level: usize) -> Result<(), LsmError> {
         log::info!(
             "Extending levels from {} to {}",

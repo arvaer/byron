@@ -40,7 +40,7 @@ This section provides a detailed overview of byron’s design considerations and
 Our overarching goal is to minimize disk I/O and CPU cache misses by optimizing the on-disk data layout.
 byron uses a Log-Structured Merge Tree (LSM) architecture, and compacts stored data frequently to reduce fragmentation and improve read performance.
 A key component of the LSM tree is the SSTable, which is an immutable on-disk file that stores sorted key-value pairs. The design of the SSTable is critical to achieving high performance in both read and write operations.
-The SSTable is designed to be compact and efficient, with a focus on minimizing disk I/O and CPU cache misses. 
+The SSTable is designed to be compact and efficient, with a focus on minimizing disk I/O and CPU cache misses.
 In our design, we align SSTable blocks to 4 KB SSD pages for minimal random accesses and high sequential I/O throughput, and use key compression to pack more entries per page.
 
 \paragraph{Design Elements}
@@ -53,17 +53,17 @@ In our design, we align SSTable blocks to 4 KB SSD pages for minimal random acce
 \end{description}
 
 \paragraph{Rationale}
-An SSTable is an immutable on‐disk file of sorted key–value pairs with the above optimizations.  
-Keys are serialized by first writing a varint length, then a byte‐slice delta from the previous key.  
-Within each 4 KB block, restart points ensure you never examine more than 9 other keys on average.  
-The restart‐pointer index (one key per block) lives in RAM, so most $\mathtt{GET}$s need at most one disk read—and none if the key isn’t present.  
+An SSTable is an immutable on‐disk file of sorted key–value pairs with the above optimizations.
+Keys are serialized by first writing a varint length, then a byte‐slice delta from the previous key.
+Within each 4 KB block, restart points ensure you never examine more than 9 other keys on average.
+The restart‐pointer index (one key per block) lives in RAM, so most $\mathtt{GET}$s need at most one disk read—and none if the key isn’t present.
 
-Together, prefix compression plus restart indexing typically save about 3 bytes per 32-byte key.  
+Together, prefix compression plus restart indexing typically save about 3 bytes per 32-byte key.
 In skewed key distributions (e.g.\ sequential timestamps), the stored suffix length approaches a small constant, making delta encoding extremely efficient when keys share long prefixes.
 Analysis in \S\ref{sec:SSTable Optimization Efficacy} elucidates the performance of these optimizations under expected bytes saved.
 
 \paragraph{Variable Integer Width}
-Instead of representing fields in our keys as flat integers, we instead use Variable-width Integers– a format popularized by the Protobufs project. Each byte in a varint consists of a continuation bit and a 7 bit payload– the continuation bit being there to let us know whether this bit is a continuation of the previous byte. 
+Instead of representing fields in our keys as flat integers, we instead use Variable-width Integers– a format popularized by the Protobufs project. Each byte in a varint consists of a continuation bit and a 7 bit payload– the continuation bit being there to let us know whether this bit is a continuation of the previous byte.
 \begin{verbatim}
 continuation bit | 0 1 2 3 4 5 6
 \end{verbatim}
@@ -103,19 +103,19 @@ For example, if we have two keys `key1` and `key2`, instead of storing both keys
   \end{minipage}
 \end{figure}
 
-The draw back to using Delta Encoding is that in order to find a key, we must then linear search the entire block. This is undesirable, as now we incur a cost of O(n), where n is the block size. 
-To combat this, we embed `Restart Points` in each block; and we do so at every 10th key. 
+The draw back to using Delta Encoding is that in order to find a key, we must then linear search the entire block. This is undesirable, as now we incur a cost of O(n), where n is the block size.
+To combat this, we embed `Restart Points` in each block; and we do so at every 10th key.
 
 
 \paragraph{Page Hash Index}
 
-On their own, Restart points are saved as pointers at the end of a SStable in the footer. In order to beat Binary Searching these restart pointers, we need to do something else. This comes in the form of a Page Hash index. 
+On their own, Restart points are saved as pointers at the end of a SStable in the footer. In order to beat Binary Searching these restart pointers, we need to do something else. This comes in the form of a Page Hash index.
 Simply put, a page hash index matches a keys hash with it's restart point. Each entry has a maximum of 8 bits width, and points to a restart page. Implicitly, this means we can identify at most 256 restarts.
 The amount of slots is the number of keys. This is a very simple hash table, so collisions are possible. In the case of there being a collision, we cancel the slot and default to binary search.
 
 \paragraph{SSTable Footer}
 In the common literature, footer of an SSTable contains metadata about the table, including the size of the table, the number of keys, and the location of the restart points. This information is used to quickly locate and access the data in the SSTable. The footer is also compressed to save space.
-However, in byron, for simplicities sake, we store the page hash index and restart points in RAM. 
+However, in byron, for simplicities sake, we store the page hash index and restart points in RAM.
 
 
 
@@ -212,8 +212,8 @@ The goal of the Bloom filter and fence pointer design is to minimize disk reads 
 
 \begin{description}[leftmargin=1em,labelwidth=*,itemsep=0.5ex]
   \item[Per‐SSTable Filters] Each SSTable has an in‐memory Bloom filter. On a \texttt{GET}, we query the filter first—if it says “not present,” we skip that SSTable entirely (no disk I/O).
-  \item[Monkey‐Inspired Allocation] We distribute Bloom‐filter bits across LSM levels proportional to data volume, giving larger lower‐level tables more bits per key.  
-  \item[Performance Impact] Tuning the total filter budget from 100 K bits to 10 M bits per SSTable improved \texttt{GET} throughput by ~10\%, with diminishing returns beyond ~1 M bits.  
+  \item[Monkey‐Inspired Allocation] We distribute Bloom‐filter bits across LSM levels proportional to data volume, giving larger lower‐level tables more bits per key.
+  \item[Performance Impact] Tuning the total filter budget from 100 K bits to 10 M bits per SSTable improved \texttt{GET} throughput by ~10\%, with diminishing returns beyond ~1 M bits.
   \item[Sparse In‐Memory Index] We store the first key of each 4 KB block in an array. A binary search on this “fence pointer” array locates the exact block in $O(\log B)$ time (where $B$ is the number of blocks).
   \item[Compact \& Fast] At only a few bytes per block, the index comfortably fits in RAM. Combined with Bloom filters, most \texttt{GET}s incur at most one block read—and many incur none.\@
   \item[Cache Efficiency] In large‐scale tests, overall CPU cache miss rates stayed in the 3–8 \% range, demonstrating the effectiveness of this two‐tiered in‐memory strategy.
@@ -226,7 +226,7 @@ The goal of the Bloom filter and fence pointer design is to minimize disk reads 
 Our overarching goal here is to balance read and write amplification by tuning when and how SSTables are merged. byron uses an expansion factor of $\varphi\approx1.618$ (the golden ratio) between LSM levels to decide compaction points.
 
 \begin{description}[leftmargin=1em,labelwidth=*,itemsep=0.5ex]
-  \item[Size Ratio] When level $L_{i}$ grows to $\varphi \times |L_{i-1}|$, we compact a small number of tables from $L_{i}$ into $L_{i+1}$.  
+  \item[Size Ratio] When level $L_{i}$ grows to $\varphi \times |L_{i-1}|$, we compact a small number of tables from $L_{i}$ into $L_{i+1}$.
   \item[Frequent, Small Jobs] A lower ratio (vs.\ the typical 10×) yields more levels but smaller merges, smoothing write‐amplification and avoiding long stalls.
 \end{description}
 
@@ -251,22 +251,22 @@ Beyond the core LSM design, we implemented two further performance enhancements:
 
 \subsubsection*{(A) Hardware-Cache Conscious Coding}
 \begin{description}[leftmargin=1em,labelwidth=*,itemsep=0.5ex]
-  \item[256-Byte Alignment]  
+  \item[256-Byte Alignment]
     Align hot data structures to 256-byte boundaries (multiple cache lines) to reduce cache-line contention and false sharing. In multithreaded tests, this yielded measurably lower CPU cache-miss rates.
-  \item[4 KB Page Alignment]  
+  \item[4 KB Page Alignment]
     Align all SSTable block writes to 4096-byte (4 KB) boundaries, matching OS page sizes and SSD erase-block sizes. This prevents cross-page I/O and maximizes sequential read/write throughput.
-  \item[Great Cache Locality]  
-    Empiracally, we found that the cache miss rate for our skiplist-backed memtable was about 4.99\% (down from 10.69\% with the vector-backed memtable). 
+  \item[Great Cache Locality]
+    Empiracally, we found that the cache miss rate for our skiplist-backed memtable was about 4.99\% (down from 10.69\% with the vector-backed memtable).
     Moreover, on full workloads, our cache miss rate was about 3.41\% for 1M GETs and 4.08\% for 2.5M GETs, suggesting our design is cache-friendly and efficient in terms of memory access patterns.
 \end{description}
 
 % \subsubsection*{(B) Multi-Layered Compression Techniques}
 % \begin{description}[leftmargin=1em,labelwidth=*,itemsep=0.5ex]
-%   \item[Delta Encoding of Keys]  
+%   \item[Delta Encoding of Keys]
 %     Store only the non-shared suffix of each key relative to its predecessor, drastically reducing on-disk size when prefixes repeat.
-%   \item[Varint Encoding]  
+%   \item[Varint Encoding]
 %     Encode all integer metadata (lengths, sequence numbers) as varints so that small values consume fewer bytes (e.g.\ 1 byte instead of 8 bytes for a length of 20).
-%   \item[Future Extensions]  
+%   \item[Future Extensions]
 %     The codebase includes hooks for optional block-level compression (LZ4, Huffman, etc.). These can be enabled later when write-latency budgets allow deeper compression.
 % \end{description}
 
@@ -276,7 +276,7 @@ These hardware-aware alignments plus multi-layered compression together boost ru
 
 \subsubsection*{(A) Ensuring Memory Safety Without \texttt{unsafe}}
 
-\paragraph{Context}  
+\paragraph{Context}
 byron’s on-disk format requires zero-copy parsing of byte-aligned structures (varints, key deltas, block headers) without ever using `unsafe` Rust. Guaranteeing correctness across cache-line and page boundaries posed a major challenge.
 
 \paragraph{Key Strategies}
@@ -286,17 +286,17 @@ byron’s on-disk format requires zero-copy parsing of byte-aligned structures (
   \item[Rust Type \& Lifetime Safety] On-disk buffers map to tight Rust structs; lifetimes ensure slices don’t outlive their backing buffers. Iterator APIs yield owned key/value objects to avoid dangling references.
 \end{description}
 
-\paragraph{Outcome}  
+\paragraph{Outcome}
 These measures let us ship a fully memory-safe SSTable format with zero `unsafe` code in the core, relying on Rust’s borrow checker plus test coverage to enforce correctness.
 
 \subsubsection*{(B) Transitioning to \texttt{crossbeam} for Concurrency}
 
-\paragraph{Context}  
+\paragraph{Context}
 Evolving byron from a single-threaded prototype to a high-throughput, multi-core system revealed two main pain points: thread starvation and subtle deadlocks between flush and compaction tasks.
 
 \paragraph{Challenges}
 \begin{description}[leftmargin=1em,labelwidth=*,itemsep=0.5ex]
-  \item[Thread Contention \& Starvation] Separate pools for front-end (GET/PUT) and background (flush/compaction) tasks starved compaction threads under heavy load, causing flush back-pressure. 
+  \item[Thread Contention \& Starvation] Separate pools for front-end (GET/PUT) and background (flush/compaction) tasks starved compaction threads under heavy load, causing flush back-pressure.
   \item[] This led to stalls and degraded performance, as the compaction pool was not fully utilized.
   \item[Deadlock in Flush/Compaction] Immutable memtables could remain referenced by reads or ongoing compactions, leading to circular waits and deadlocks despite Rust’s safety guarantees.
 \end{description}
@@ -309,8 +309,8 @@ Evolving byron from a single-threaded prototype to a high-throughput, multi-core
   \item[Fine-Grained Scheduling] Ensured the compaction pool always retained at least one active thread and decoupled its scheduling from front-end load.
 \end{description}
 
-\paragraph{Outcome}  
-Post-refactor, byron sustained continuous write ingest and background compactions without deadlocks or stalls. Leveraging Crossbeam’s battle-tested data structures radically simplified concurrency, letting us focus on higher-level optimizations rather than low-level threading bugs.  
+\paragraph{Outcome}
+Post-refactor, byron sustained continuous write ingest and background compactions without deadlocks or stalls. Leveraging Crossbeam’s battle-tested data structures radically simplified concurrency, letting us focus on higher-level optimizations rather than low-level threading bugs.
 
 
 \section{Hardware and Software Setup}
@@ -344,15 +344,16 @@ Table~\ref{tab:get_read_perf} shows the uniform‐distribution metrics:
   \small
   \begin{tabular}{r r r r r}
     \toprule
-    \# GETs & CPU Cycles & Instructions & Cache Miss \% & Time (s) \\
+    \# GETs     & CPU Cycles                        & Instructions                         & Cache Miss \% & Time (s)         \\
     \midrule
-    10\,K  & $(12.69\pm0.16)\times10^9$ & $40.73\times10^9$    & 10.14 & $2.61\pm0.04$  \\
-    100\,K & $(14.90\pm0.18)\times10^9$ & $48.48\times10^9$    & 6.68  & $3.17\pm0.04$  \\
-    1\,M   & $(143.09\pm0.96)\times10^9$& $593.08\times10^9$   & 3.41  & $29.97\pm0.28$ \\
-    2.5\,M & $(526.49\pm2.44)\times10^9$& $2.29\times10^{12}$  & 4.08  & $107.24\pm1.64$\\
+    10\,K       & $(12.69\pm0.16)\times10^9$        & $(40.73\pm0.01)\times10^9$           & 10.14         & $2.61\pm0.04$    \\
+    100\,K      & $(14.90\pm0.18)\times10^9$        & $(48.48\pm0.03)\times10^9$           & 6.68          & $3.17\pm0.04$    \\
+    1\,M        & $(143.09\pm0.96)\times10^9$       & $(593.08\pm0.52)\times10^9$          & 3.41          & $29.97\pm0.28$   \\
+    2.5\,M      & $(526.49\pm2.44)\times10^9$       & $(2.29\pm0.02)\times10^{12}$         & 4.08          & $107.24\pm1.64$  \\
+    Mixed 1\,M  & $(2.607\pm0.048)\times10^{12}$    & $(3.910\pm0.038)\times10^{12}$       & 13.30         & $59.58\pm2.67$   \\
     \bottomrule
   \end{tabular}
-  \caption{Uniform‐distribution GET performance metrics.}
+  \caption{Uniform‐distribution GET performance metrics, including mixed‐access workload.}
   \label{tab:get_read_perf}
 \end{table}
 
@@ -371,25 +372,30 @@ Throughput scales linearly with query load. Cache miss rate drops from 10.1 \% a
 \subsection{PUT (Write) Performance}
 
 \paragraph{Setup}
-We benchmarked single-threaded bulk inserts into an empty byron instance.  
+We benchmarked single-threaded bulk inserts into an empty byron instance.
 We loaded 1 M, 5 M, and 10 M key–value pairs, measuring total time and computing throughput as inserts / time.
 
 \paragraph{Results}
 \begin{table}[htbp]
   \centering
   \small
-  \begin{tabular}{r r r}
+  \begin{tabular}{r r r r r r r r}
     \toprule
-    \# Inserts & Time (s) & Throughput (ops/s) \\
+    \# Inserts   & CPU Cycles                       & Instructions                        & Cache Refs                       & Cache Miss \% & Elapsed (s)     & User (s)        & Sys (s)         \\
     \midrule
-    1\,M  & 2.25   & $4.44\times10^5$ \\
-    5\,M  & 13.1   & $3.81\times10^5$ \\
-    10\,M & 27.9   & $3.58\times10^5$ \\
+    1\,M         & $(12.505\pm0.061)\times10^{9}$   & $(40.325\pm0.004)\times10^{9}$      & $(203.015\pm2.918)\times10^{6}$  & $10.69\pm0.23$ & $2.53\pm0.03$   & $2.28\pm0.01$   & $0.23\pm0.02$   \\
+    5\,M         & $(68.557\pm0.604)\times10^{9}$   & $(153.271\pm0.224)\times10^{9}$     & $(3.481\pm0.086)\times10^{9}$    & $12.14\pm0.29$ & $21.40\pm0.40$  & $12.30\pm0.13$  & $8.88\pm0.27$   \\
+    10\,M        & $(276.458\pm14.320)\times10^{9}$ & $(387.272\pm0.886)\times10^{9}$     & $(21.302\pm0.982)\times10^{9}$   & $7.85\pm0.36$  & $136.41\pm7.56$ & $49.93\pm2.55$  & $85.09\pm4.76$  \\
+    Mixed 1\,M   & $(257.876\pm8.864)\times10^{9}$  & $(455.471\pm3.387)\times10^{9}$     & $(7.980\pm0.535)\times10^{9}$    & $8.69\pm0.74$  & $9.05\pm0.66$   & $45.49\pm2.01$  & $28.09\pm1.30$  \\
+    Rayon 10\,M  & $(142.164\pm8.003)\times10^{9}$  & $(506.605\pm11.598)\times10^{9}$    & $(2.648\pm0.681)\times10^{9}$    & $9.49\pm1.30$  & $27.92\pm0.75$  & $25.48\pm1.54$  & $2.71\pm0.14$   \\
+    Rayon 1\,M   & $(11.590\pm0.068)\times10^{9}$   & $(42.265\pm0.009)\times10^{9}$      & $(195.481\pm3.745)\times10^{6}$  & $4.99\pm0.40$  & $2.25\pm0.03$   & $2.08\pm0.02$   & $0.15\pm0.01$   \\
+    Rayon 5\,M   & $(68.028\pm4.968)\times10^{9}$   & $(246.052\pm7.296)\times10^{9}$     & $(1.210\pm0.423)\times10^{9}$    & $8.46\pm1.32$  & $13.12\pm0.33$  & $12.16\pm0.91$  & $1.04\pm0.08$   \\
     \bottomrule
   \end{tabular}
-  \caption{Bulk insert performance.}
-  \label{tab:put_perf}
+  \caption{PUT operation performance metrics across different workloads and configurations.}
+  \label{tab:put_perf_full}
 \end{table}
+
 
 \paragraph{Observations}
 \begin{itemize}[itemsep=0.5ex]
@@ -406,11 +412,21 @@ byron exhibits near-linear write scalability up to 10 M inserts on one thread.  
 \paragraph{Setup}
 We loaded 1\,M keys, then issued range queries that return 100 consecutive entries each. Results were measured on a single thread, recording total scan time and effective keys/sec.
 
-\paragraph{Workload Distributions}
-\begin{itemize}[itemsep=0.5ex]
-  \item \textbf{Uniform Random} start keys across the full keyspace.
-  \item \textbf{Gaussian Clustered} start keys to simulate hotspots.
-\end{itemize}
+\paragraph{Results}
+\begin{table}[htbp]
+  \centering
+  \small
+  \begin{tabular}{r r r r r r r r}
+    \toprule
+    Workload   & CPU Cycles                        & Instructions                         & Cache Refs                       & Cache Miss \% & Elapsed (s)     & User (s)        & Sys (s)         \\
+    \midrule
+    Gaussian   & $(54.718\pm0.276)\times10^{9}$    & $(211.731\pm0.062)\times10^{9}$      & $(1.584\pm0.013)\times10^{9}$    & $5.27\pm0.24$ & $11.09\pm0.10$  & $10.12\pm0.11$  & $0.88\pm0.03$   \\
+    Uniform    & $(55.030\pm0.228)\times10^{9}$    & $(214.170\pm0.047)\times10^{9}$      & $(1.579\pm0.015)\times10^{9}$    & $5.16\pm0.32$ & $11.23\pm0.10$  & $10.17\pm0.09$  & $0.95\pm0.04$   \\
+    \bottomrule
+  \end{tabular}
+  \caption{RANGE operation performance metrics for Gaussian and Uniform query workloads.}
+  \label{tab:range_perf_full}
+\end{table}
 
 \paragraph{Results}
 Range scans achieve approximately 200\,K keys/sec (tens of MB/s), near the SSD’s sequential‐read limit. Performance was virtually identical under both uniform and clustered start distributions, thanks to:
@@ -428,20 +444,23 @@ byron’s range query throughput is bound by raw disk bandwidth, with negligible
 \paragraph{Setup}
 We loaded datasets of 100\,K and 1\,M keys, then issued delete operations (tombstones) for all keys. Measured total time and computed deletions/sec.
 
+\paragraph{Results}
 \begin{table}[htbp]
   \centering
   \small
-  \begin{tabular}{r r r}
+  \begin{tabular}{r r r r r r r r}
     \toprule
-    \# Deletes & Time & Throughput (ops/s) \\
+    \# Deletes  & CPU Cycles                         & Instructions                          & Cache Refs                        & Cache Miss \% & Elapsed (s)     & User (s)        & Sys (s)         \\
     \midrule
-    100\,K & 0.2\,s & $5.0\times10^5$ \\
-    1\,M   & 2.0\,s & $5.0\times10^5$ \\
+    100\,K      & $(8.585\pm0.064)\times10^{9}$      & $(22.774\pm0.012)\times10^{9}$        & $(237.704\pm5.841)\times10^{6}$   & $12.17\pm0.21$ & $1.90\pm0.01$   & $1.55\pm0.03$   & $0.34\pm0.02$   \\
+    500\,K      & $(7.633\pm0.061)\times10^{9}$      & $(18.413\pm0.017)\times10^{9}$        & $(212.001\pm1.942)\times10^{6}$   & $12.05\pm0.26$ & $1.70\pm0.02$   & $1.39\pm0.02$   & $0.31\pm0.01$   \\
+    1\,M        & $(8.610\pm0.075)\times10^{9}$      & $(20.740\pm0.035)\times10^{9}$        & $(195.164\pm1.331)\times10^{6}$   & $12.40\pm0.12$ & $1.82\pm0.01$   & $1.57\pm0.01$   & $0.23\pm0.01$   \\
     \bottomrule
   \end{tabular}
-  \caption{Bulk delete performance.}
-  \label{tab:delete_perf}
+  \caption{DELETE operation performance metrics across different batch sizes.}
+  \label{tab:delete_perf_full}
 \end{table}
+
 
 \paragraph{Observations}
 \begin{itemize}[itemsep=0.5ex]
@@ -451,7 +470,7 @@ We loaded datasets of 100\,K and 1\,M keys, then issued delete operations (tombs
 \end{itemize}
 
 \paragraph{Summary}
-Delete operations cost no more than small writes and sustain high throughput. Treating deletes as in-memory tombstones defers cleanup to compaction, ensuring stable performance even under delete‐heavy workloads.  
+Delete operations cost no more than small writes and sustain high throughput. Treating deletes as in-memory tombstones defers cleanup to compaction, ensuring stable performance even under delete‐heavy workloads.
 
 \section{Experimental Analysis of Optimizations}
 
@@ -488,7 +507,7 @@ We reran single-threaded bulk insert experiments on byron, loading 1\,M, 5\,M, a
 \end{itemize}
 
 \paragraph{Summary}
-Replacing the double-buffered vector with a lock-free skiplist yielded dramatic write‐throughput gains, reduced write amplification, and improved CPU utilization under heavy insert workloads.  
+Replacing the double-buffered vector with a lock-free skiplist yielded dramatic write‐throughput gains, reduced write amplification, and improved CPU utilization under heavy insert workloads.
 
 \subsection{Bloom Filter Memory Tuning}
 
@@ -518,12 +537,12 @@ We preloaded 1\,M keys into byron and executed 1\,M \texttt{GET} queries (50\% e
 \end{itemize}
 
 \paragraph{Summary}
-Allocating around 1–2 bits per key offers most of the benefit: further memory increases only marginally improve latency. This validates our “Monkey”-inspired bit allocation and informs a practical default for production deployments.  
+Allocating around 1–2 bits per key offers most of the benefit: further memory increases only marginally improve latency. This validates our “Monkey”-inspired bit allocation and informs a practical default for production deployments.
 
 
 \subsection{SSTable Optimization Efficacy}
 While not an “experiment” in the same sense as above, we performed an analytical evaluation of our key compression techniques (varint and delta encoding) to understand their impact on space and performance. We analyzed the expected encoded key size under different scenarios:
-\paragraph{Varint Encoding}  
+\paragraph{Varint Encoding}
 Instead of fixed-width integers, we encode metadata lengths as variable-width “varints” (continuation bit + 7-bit payload per byte).  For any nonnegative integer \(N\), the number of bytes used is
 \[
 S(N) \;=\;\left\lceil \frac{\log_{2}(N+1)}{7} \right\rceil.
@@ -543,10 +562,10 @@ By the tail-sum formula,
 \end{figure}
 
 
-\textbf{Case A: Uniform \(\,N\in[0,A]\)}  
+\textbf{Case A: Uniform \(\,N\in[0,A]\)}
 \[
 \Pr[S = k]
-= \frac{2^{7k} - 2^{7(k-1)}}{A+1}, 
+= \frac{2^{7k} - 2^{7(k-1)}}{A+1},
 \quad
 \mathbb{E}[S]
 = \sum_{k=1}^{\lceil\frac{\log_2(A+1)}{7}\rceil}
@@ -554,14 +573,14 @@ By the tail-sum formula,
 \]
 For 32-bit keys \((A=2^{32}-1)\), this yields \(\mathbb{E}[S]\approx4.94\) bytes.
 
-\textbf{Case B: Geometric \(\, \Pr[N=n]=(1-p)^n p\)}  
+\textbf{Case B: Geometric \(\, \Pr[N=n]=(1-p)^n p\)}
 \[
 \Pr[N\ge x] = (1-p)^x,\quad
 \mathbb{E}[S] = \sum_{k=1}^\infty (1-p)^{2^{7(k-1)}}.
 \]
 With \(p=0.2\), \((1-p)^{128}\approx1.7\times10^{-31}\), so \(\mathbb{E}[S]\approx1\) byte.
 
-\paragraph{Delta Encoding}  
+\paragraph{Delta Encoding}
 Each key is split into
 \[
 \underbrace{\text{shared\_bytes}}_{\text{varint}}
@@ -584,14 +603,14 @@ With restarts every \(R\) keys (\(R=10\)), only a fraction \(1-\tfrac1R\) benefi
 \mathbb{E}[\text{S}] = \Bigl(1 - \tfrac1R\Bigr)\,\mathbb{E}[X].
 \]
 
-\paragraph{Restart Points}  
+\paragraph{Restart Points}
 To bound search cost within a block, we store each \(R\)th key in full.  This ensures
 at most \(R-1\) delta-decoded keys per search, reducing worst-case \(O(n)\) scans to \(O(R)\).
 
-\paragraph{Page Hash Index}  
+\paragraph{Page Hash Index}
 We map each restart key into an 8-bit hash table (256 slots).  Collisions “cancel” a slot, falling back to binary search.
 
-\textbf{Collision Analysis (Poisson \(\lambda=1\))}  
+\textbf{Collision Analysis (Poisson \(\lambda=1\))}
 \[
 P(k) = \frac{\lambda^k e^{-\lambda}}{k!},\quad
 P(\text{usable}) = P(1),\quad
@@ -612,11 +631,11 @@ P(\text{usable}|\text{cancelled}) = \frac{P(\text{usable})}{P(\text{usable}) + P
 Thus \(\sim60\%\) of lookups hit in \(O(1)\); the remainder incur an \(O(\log R)\) binary search.
 
 \paragraph{Summary}
-- \emph{Varint}: \(\mathbb{E}[S]=O(\log A)\) worst-case, constant (~1–5 bytes) in practice.  
-- \emph{Delta}: Saves \(\approx\mathbb{E}[X]\) bytes per key, with restarts smoothing search cost.  
-- \emph{Hash Index}: Provides \(O(1)\) block lookups ~60\% of the time; otherwise falls back gracefully.  
+- \emph{Varint}: \(\mathbb{E}[S]=O(\log A)\) worst-case, constant (~1–5 bytes) in practice.
+- \emph{Delta}: Saves \(\approx\mathbb{E}[X]\) bytes per key, with restarts smoothing search cost.
+- \emph{Hash Index}: Provides \(O(1)\) block lookups ~60\% of the time; otherwise falls back gracefully.
 
-Together, these techniques yield significant on-disk reduction (e.g.\ ~3 B saved per 16 B key) with minimal CPU overhead.  
+Together, these techniques yield significant on-disk reduction (e.g.\ ~3 B saved per 16 B key) with minimal CPU overhead.
 
 
 
