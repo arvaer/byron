@@ -5,13 +5,13 @@ use byron::byron_client::ByronClient;
 use byron::*;
 use clap::{Parser, Subcommand};
 use stats::WorkloadStats;
-use tokio::io::{self, AsyncBufReadExt, AsyncReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tonic::transport::Channel;
 
 pub mod byron {
     tonic::include_proto!("byron");
 
-    pub(crate) const FILE_DESCRIPTOR_SET: &[u8] =
+    pub(crate) const _FILE_DESCRIPTOR_SET: &[u8] =
         tonic::include_file_descriptor_set!("byron_descriptor");
 }
 
@@ -84,7 +84,7 @@ async fn handle_delete(
 }
 
 async fn handle_load(
-    mut client: ByronClient<Channel>,
+    client: ByronClient<Channel>,
     file_path: String,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let file = tokio::fs::File::open(file_path).await?;

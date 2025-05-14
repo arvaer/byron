@@ -23,7 +23,7 @@ impl Default for ByronServerContext {
     fn default() -> Self {
         let database = LsmDatabase::new("./data".to_string(), None);
         Self {
-            database: Arc::new(RwLock::new(database))
+            database: Arc::new(RwLock::new(database)),
         }
     }
 }
@@ -39,7 +39,8 @@ impl Byron for ByronServerContext {
 
         let db = self.database.read().await;
         let kv = db
-            .get(key).await
+            .get(key)
+            .await
             .map_err(|e| Status::internal(format!("Database error: {:?}", e)))?;
 
         let value: i64 = kv
@@ -61,7 +62,7 @@ impl Byron for ByronServerContext {
         let input = request.get_ref();
         let key = input.key.to_string();
         let value = input.value.to_string();
-        let mut db = self.database.write().await;
+        let db = self.database.write().await;
         let _ = db.put(key, value).await;
         drop(db);
 
@@ -82,7 +83,8 @@ impl Byron for ByronServerContext {
 
         let db = self.database.read().await;
         let values = db
-            .range(start, end).await
+            .range(start, end)
+            .await
             .map_err(|e| Status::internal(format!("Database Error: {:?}", e)))?
             .iter()
             .map(|item| byron::KeyValue {
@@ -115,9 +117,10 @@ impl Byron for ByronServerContext {
         let input = request.get_ref();
         let key = input.key.to_string();
 
-        let mut db = self.database.write().await;
+        let db = self.database.write().await;
         let _ = db
-            .delete(key).await
+            .delete(key)
+            .await
             .map_err(|e| Status::internal(format!("Database error: {:?}", e)))?;
         drop(db);
 
@@ -126,7 +129,7 @@ impl Byron for ByronServerContext {
         Ok(Response::new(response))
     }
 
-    async fn load(&self, request: Request<LoadRequest>) -> Result<Response<LoadResponse>, Status> {
+    async fn load(&self, _request: Request<LoadRequest>) -> Result<Response<LoadResponse>, Status> {
         todo!()
     }
 }
