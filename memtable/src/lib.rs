@@ -18,12 +18,14 @@ pub enum RangeResult {
 
 pub trait MemTableOperations {
     fn put(&mut self, key: String, value: String);
+    fn insert(&self, key: String, value: String);
     fn get(&self, key: &str) -> Option<Box<KeyValue>>;
     fn range(&self, from_m: &str, to_n: &str) -> (Vec<Box<KeyValue>>, RangeResult);
     fn at_capacity(&self) -> bool;
     fn current_length(&self) -> usize;
+    fn max_entries(&self) -> usize;
     fn flush(
-        &mut self,
+        &self,
         path: PathBuf,
         table_params: SSTableFeatures,
     ) -> Result<Arc<SSTable>, crate::error::MemTableError>;
@@ -44,7 +46,7 @@ impl Default for DataStructure {
 
 #[derive(Debug, Default)]
 pub struct MemTable {
-    inner: DataStructure,
+    pub inner: DataStructure,
 }
 
 impl MemTableOperations for MemTable {
@@ -55,7 +57,13 @@ impl MemTableOperations for MemTable {
             DataStructure::SkipList(memtable) => memtable.put(key, value),
         }
     }
-
+    fn insert(&self, key: String, value: String) {
+        match &self.inner {
+            //take exclusive reference to self.inner
+            DataStructure::Vector(memtable) => memtable.insert(key, value),
+            DataStructure::SkipList(memtable) => memtable.insert(key, value),
+        }
+    }
     fn get(&self, key: &str) -> Option<Box<KeyValue>> {
         match &self.inner {
             //shared reference
@@ -86,12 +94,19 @@ impl MemTableOperations for MemTable {
         }
     }
 
+    fn max_entries(&self) -> usize {
+        match &self.inner {
+            DataStructure::Vector(memtable) => memtable.max_entries(),
+            DataStructure::SkipList(memtable) => memtable.max_entries(),
+        }
+    }
+
     fn flush(
-        &mut self,
+        &self,
         path: PathBuf,
         table_params: SSTableFeatures,
     ) -> Result<Arc<SSTable>, crate::error::MemTableError> {
-        match &mut self.inner {
+        match &self.inner {
             DataStructure::Vector(memtable) => memtable.flush(path, table_params),
             DataStructure::SkipList(memtable) => memtable.flush(path, table_params),
         }

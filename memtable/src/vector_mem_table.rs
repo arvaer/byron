@@ -36,6 +36,9 @@ impl MemTableOperations for VectorMemTable {
     fn put(&mut self, key: String, value: String) {
         self.data.push(KeyValue { key, value })
     }
+    fn insert(&self, key: String, value: String) {
+        todo!();
+    }
 
     fn get(&self, key: &str) -> Option<Box<KeyValue>> {
         self.data
@@ -85,8 +88,12 @@ impl MemTableOperations for VectorMemTable {
         self.data.len()
     }
 
+    fn max_entries(&self) -> usize {
+        self.max_entries
+    }
+
     fn flush(
-        &mut self,
+        &self,
         path: PathBuf,
         table_params: SSTableFeatures,
     ) -> Result<Arc<SSTable>, crate::error::MemTableError> {

@@ -18,10 +18,11 @@ pub struct WorkloadStats {
     pub unknown_commands: usize,
 }
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 32)]
+#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let parent_directory = "./data".to_string();
-    let mut byron = Arc::new(LsmDatabase::new(parent_directory, None));
+    let byron = Arc::new(LsmDatabase::new(parent_directory, None));
+    let mut count = 0;
 
     let file = tokio::fs::File::open("workload.txt".to_string()).await?;
     let reader = BufReader::new(file);
@@ -29,6 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut stats = WorkloadStats::default();
 
     while let Some(line) = lines.next_line().await? {
+        println!("{}", count);
         let parts: Vec<&str> = line.split_whitespace().collect();
         if parts.is_empty() {
             continue;
@@ -36,6 +38,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         match parts[0] {
             "p" if parts.len() == 3 => {
+        count += 1;
                 let key = parts[1].parse::<i64>()?;
                 let value = parts[2].parse::<i64>()?;
                 match byron.put(key.to_string(), value.to_string()).await {
@@ -47,8 +50,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             "g" if parts.len() == 2 => match parts[1].parse::<i64>() {
-                Ok(key) => match byron.get(key.to_string()) {
+                Ok(key) => match byron.get(key.to_string()).await {
                     Ok(target) => {
+                        stats.get_success += 1;
                         println!("GET {} -> {}", key, target.value);
                     }
                     Err(e) => {
@@ -72,7 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let from = parts[1].parse::<i64>()?;
                 let to = parts[2].parse::<i64>()?;
 
-                match byron.range(from.to_string(), to.to_string()) {
+                match byron.range(from.to_string(), to.to_string()).await {
                     Ok(target) => {
                         for value in target {
                             println!("{} -> {}", value.key, value.value);

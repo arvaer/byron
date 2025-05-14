@@ -1,13 +1,12 @@
+use arc_swap::ArcSwap;
 use key_value::KeyValue;
 use memtable::{mem_table_builder::MemTableBuilder, MemTable, MemTableOperations};
 use rayon::prelude::*;
-use sstable::{
-    builder::{SSTableBuilder, SSTableFeatures},
-    error::SSTableError,
-    SSTable,
-};
-use std::{mem, path::PathBuf, sync::Arc};
-use tokio::sync::RwLock;
+use sstable::{builder::SSTableFeatures, error::SSTableError, SSTable};
+use std::collections::HashMap;
+use std::{path::PathBuf, sync::Arc};
+use tokio::runtime::Runtime;
+use tokio::sync::{Mutex, RwLock};
 use tokio::task;
 use uuid::Uuid;
 
@@ -22,11 +21,13 @@ pub struct Level {
 }
 
 pub struct LsmDatabase {
-    pub primary: Arc<RwLock<MemTable>>,
+    // Vector of memtables, newest first (at index 0)
+    pub memtables: Arc<Mutex<Vec<(Uuid, Arc<MemTable>)>>>,
     pub levels: Arc<RwLock<Vec<Level>>>,
     pub parent_directory: PathBuf,
     pub capacity_expansion_factor: f64,
     pub base_fpr: f64,
+    pub max_memtables: usize, // Limit total memtables to control memory usage
 }
 
 impl LsmDatabase {
@@ -37,55 +38,57 @@ impl LsmDatabase {
             width: 2,
             total_entries: 0,
         };
+
+
+        let initial_memtable = Arc::new(MemTableBuilder::default().max_entries(1000).build());
+        let initial_id = Uuid::new_v4();
+
         Self {
-            primary: Arc::new(RwLock::new(
-                MemTableBuilder::default().max_entries(1000).build(),
-            )),
+            memtables: Arc::new(Mutex::new(vec![(initial_id, initial_memtable)])),
             levels: Arc::new(RwLock::new(vec![first])),
             parent_directory: data_dir.into(),
             capacity_expansion_factor: expand.unwrap_or(1.618),
             base_fpr: 0.005,
+            max_memtables: 10,
         }
     }
 
-    fn flash(&self) -> task::JoinHandle<Arc<SSTable>> {
-        let primary = self.primary.clone();
-        let parent_directory = self.parent_directory.clone();
-        let features = {
-            let guard = primary.try_read().expect("primary lock poisoned");
-            SSTableFeatures {
-                item_count: guard.current_length(),
-                fpr: 0.016, // or calculate dynamically
-            }
+    // Flash a specific memtable to SSTable
+    pub async fn flash_memtable(
+        parent_dir: PathBuf,
+        memtable: Arc<MemTable>,
+    ) -> Result<Arc<SSTable>, LsmError> {
+
+        let features = SSTableFeatures {
+            item_count: memtable.current_length(),
+            fpr: 0.016,
         };
 
-        task::spawn_blocking(move || {
-            let mut guard = primary.write();
-            let mut old = mem::replace(
-                &mut *guard,
-                MemTableBuilder::default().max_entries(1000).build(),
-            );
-            drop(guard);
-
-            let path = parent_directory.join(format!("sstable-id-{}", Uuid::new_v4()));
-            let table = old.flush(path, features).expect("flush failed");
-            return table;
+        let sstable = task::spawn_blocking(move || {
+            let path = parent_dir.join(format!("sstable-id-{}", Uuid::new_v4()));
+            memtable.flush(path, features).expect("flush failed")
         })
+        .await
+        .expect("flush task panic");
+
+        Ok(sstable)
     }
 
-    fn get_sync(&self, key: String) -> Result<Arc<KeyValue>, LsmError> {
-        // 1) try memtable
-        {
-            let guard = self.primary.try_read().expect("poisoned");
-            if let Some(kv) = guard.get(&key) {
+    pub async fn get(&self, key: String) -> Result<Arc<KeyValue>, LsmError> {
+        let memtables = self.memtables.lock().await;
+
+        for (_, memtable) in memtables.iter() {
+            if let Some(kv) = memtable.get(&key) {
                 if kv.value == "d34db33f" {
                     return Err(LsmError::KeyNotFound);
                 }
                 return Ok(kv.into());
             }
         }
+        drop(memtables);
 
-        let levels = self.levels.try_read().expect("poisoned");
+        let levels = self.levels.read().await;
+
         let result = levels
             .par_iter()
             .flat_map(|lvl| lvl.inner.par_iter())
@@ -99,28 +102,65 @@ impl LsmDatabase {
         result.unwrap_or(Err(LsmError::KeyNotFound))
     }
 
-    pub async fn get(&self, key: String) -> Result<Arc<KeyValue>, LsmError> {
-        task::spawn_blocking({
-            let this = self.clone();
-            move || this.get_sync(key)
-        })
-        .await
-        .unwrap()
-    }
-
     pub async fn put(&self, key: String, value: String) -> Result<(), LsmError> {
-        {
-            let mut guard = self.primary.write().await;
-            guard.put(key.clone(), value);
-            if !guard.at_capacity() {
-                return Ok(());
+        // Get lock on memtables
+        let mut memtables = self.memtables.lock().await;
+
+        // Get active memtable (at index 0)
+        let (active_id, active_memtable) = &memtables[0];
+
+        // Insert into active memtable
+        active_memtable.insert(key, value);
+
+        // Log memtable status occasionally
+        let current_count = active_memtable.current_length();
+
+        // Check if memtable is full
+        if active_memtable.at_capacity() {
+
+            let full_table = active_memtable.clone();
+            let full_id = *active_id;
+
+            // Create new memtable and add to front of list
+            let new_id = Uuid::new_v4();
+            let new_table = Arc::new(MemTableBuilder::default().max_entries(1000).build());
+
+            // Update memtables list by inserting new one at the front
+            memtables.insert(0, (new_id, new_table));
+
+            drop(memtables);
+
+            let memtables_ref = Arc::clone(&self.memtables);
+            let parent_dir = self.parent_directory.clone();
+
+            let sstable = match LsmDatabase::flash_memtable(parent_dir, full_table).await {
+                Ok(table) => {
+                    table
+                }
+                Err(e) => {
+                    return Err(e);
+                }
+            };
+
+            let compaction_start = std::time::Instant::now();
+
+            match self.insert_new_table(sstable, 0).await {
+                Ok(_) => println!("Compaction completed in {:?}", compaction_start.elapsed()),
+                Err(e) => {
+                    eprintln!("Compaction error: {:?}", e);
+                    return Err(e);
+                }
             }
-        }
 
-        let table = self.flash().await.expect("flush panicked");
+            if let Ok(mut memtables) = memtables_ref.try_lock() {
+                let original_len = memtables.len();
+                memtables.retain(|(id, _)| id != &full_id);
 
-        let mut levels = self.levels.write().await;
-        levels[0].inner.push(table);
+            } else {
+                eprintln!("Warning: Couldn't get lock to remove memtable {}", full_id);
+            }
+
+        };
         Ok(())
     }
 
@@ -128,63 +168,95 @@ impl LsmDatabase {
         self.put(key, "d34db33f".into()).await
     }
 
-    pub fn range(&self, from_m: String, to_n: String) -> Result<Vec<Box<KeyValue>>, LsmError> {
-        let (mut results, flag) = self.primary.range(&from_m.clone(), &to_n.clone());
+    pub async fn range(
+        &self,
+        from_m: String,
+        to_n: String,
+    ) -> Result<Vec<Box<KeyValue>>, LsmError> {
+        let mut results = Vec::new();
+        let mut found_first_key = false;
+        let mut start_key = from_m.clone();
 
-        match flag {
-            memtable::RangeResult::FullSetFound => {
-                return Ok(results);
+        // Check all memtables (newest to oldest)
+        let memtables = &self.memtables.lock().await;
+
+        for (_, memtable) in memtables.iter() {
+            let (mut mem_results, flag) = memtable.range(&from_m, &to_n);
+
+            match flag {
+                memtable::RangeResult::FullSetFound => {
+                    // If any memtable has the full set, we're done
+                    return Ok(mem_results);
+                }
+                memtable::RangeResult::FirstKeyFound => {
+                    // Add these results and update our tracking
+                    results.append(&mut mem_results);
+                    found_first_key = true;
+                    // Update start_key to last key found
+                    if let Some(last) = results.last() {
+                        start_key = last.key.clone();
+                    }
+                }
+                memtable::RangeResult::KeyNotFound => {
+                    // This memtable didn't have what we needed, continue to next
+                    continue;
+                }
             }
-            memtable::RangeResult::FirstKeyFound => {
-                let start_key = results
-                    .last()
-                    .map(|kv| kv.key.clone())
-                    .unwrap_or_else(|| from_m.clone());
+        }
 
-                'outer: for level in &self.levels {
-                    for sstable in &level.inner {
-                        let (sst_entries, found_end) =
-                            sstable.get_until(&to_n).map_err(LsmError::SSTable)?;
+        // After checking all memtables, proceed based on what we found
+        if found_first_key {
+            // We found the first key in at least one memtable
+            // Proceed with SSTable search from the start_key
+            let levels_guard = self.levels.read().await;
 
-                        for box_kv in sst_entries {
-                            let k = &box_kv.key;
-                            if k.as_str() > start_key.as_str() && k.as_str() >= from_m.as_str() {
-                                results.push(box_kv);
-                            }
+            'outer: for level in levels_guard.iter() {
+                for sstable in &level.inner {
+                    let (sst_entries, found_end) =
+                        sstable.get_until(&to_n).map_err(LsmError::SSTable)?;
+
+                    for box_kv in sst_entries {
+                        let k = &box_kv.key;
+                        if k.as_str() > start_key.as_str() && k.as_str() >= from_m.as_str() {
+                            results.push(box_kv);
                         }
+                    }
 
-                        if found_end {
-                            break 'outer;
-                        }
+                    if found_end {
+                        break 'outer;
                     }
                 }
             }
-            memtable::RangeResult::KeyNotFound => {
-                'outer: for level in &self.levels {
-                    for sstable in &level.inner {
-                        match sstable.get(from_m.clone()) {
-                            Ok(_) => {
-                                for kv_res in sstable.iter() {
-                                    let kv = kv_res.map_err(LsmError::SSTable)?;
+        } else {
+            // We didn't find the first key in any memtable
+            // Proceed with full SSTable search
+            let levels_guard = self.levels.read().await;
 
-                                    if kv.key < from_m {
-                                        continue;
-                                    }
-                                    if kv.key > to_n {
-                                        break 'outer;
-                                    }
+            'outer: for level in levels_guard.iter() {
+                for sstable in &level.inner {
+                    match sstable.get(from_m.clone()) {
+                        Ok(_) => {
+                            for kv_res in sstable.iter() {
+                                let kv = kv_res.map_err(LsmError::SSTable)?;
 
-                                    results.push(Box::new(kv.clone()));
+                                if kv.key < from_m {
+                                    continue;
                                 }
-                                break 'outer;
+                                if kv.key > to_n {
+                                    break 'outer;
+                                }
+
+                                results.push(Box::new(kv.clone()));
                             }
-                            Err(SSTableError::KeyNotfound) => continue,
-                            Err(e) => return Err(LsmError::SSTable(e)),
+                            break 'outer;
                         }
+                        Err(SSTableError::KeyNotfound) => continue,
+                        Err(e) => return Err(LsmError::SSTable(e)),
                     }
                 }
             }
         }
+
         if results.is_empty() {
             Err(LsmError::KeyNotFound)
         } else {
@@ -193,15 +265,15 @@ impl LsmDatabase {
     }
 }
 
-// You may need to impl Clone for LsmDatabase manually:
 impl Clone for LsmDatabase {
     fn clone(&self) -> Self {
         Self {
-            primary: Arc::clone(&self.primary),
+            memtables: Arc::clone(&self.memtables),
             levels: Arc::clone(&self.levels),
             parent_directory: self.parent_directory.clone(),
             capacity_expansion_factor: self.capacity_expansion_factor,
             base_fpr: self.base_fpr,
+            max_memtables: self.max_memtables,
         }
     }
 }

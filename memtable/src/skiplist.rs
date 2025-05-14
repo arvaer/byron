@@ -2,15 +2,14 @@ use crate::{MemTableOperations, RangeResult};
 use crossbeam_skiplist::SkipMap;
 use key_value::KeyValue;
 use sstable::{
-    builder::{SSTableBuilder, SSTableFeatures},
-    SSTable,
+    builder::{SSTableBuilder, SSTableFeatures}, streamed_builder::StreamedSSTableBuilder, SSTable
 };
 use std::{path::PathBuf, sync::Arc};
 
 #[derive(Debug)]
 pub struct CrossBeam {
     inner: SkipMap<String, String>,
-    max_entries: usize,
+    pub max_entries: usize,
 }
 
 impl CrossBeam {
@@ -31,6 +30,10 @@ impl MemTableOperations for CrossBeam {
         self.current_length() >= self.max_entries
     }
     fn put(&mut self, key: String, value: String) {
+        self.inner.insert(key, value);
+    }
+
+    fn insert(&self, key: String, value: String) {
         self.inner.insert(key, value);
     }
 
@@ -72,11 +75,11 @@ impl MemTableOperations for CrossBeam {
     }
 
     fn flush(
-        &mut self,
+        &self,
         path: PathBuf,
         table_params: SSTableFeatures,
     ) -> Result<Arc<SSTable>, crate::error::MemTableError> {
-        let mut builder = SSTableBuilder::new(table_params, &path)?;
+        let mut builder = StreamedSSTableBuilder::new(table_params, true, &path)?;
 
         // Iterate in sorted order
         for entry in self.inner.iter() {
@@ -87,8 +90,12 @@ impl MemTableOperations for CrossBeam {
             builder.add_from_kv(kv)?;
         }
 
-        let table = builder.build()?;
+        let table = builder.finalize()?;
         Ok(table)
+    }
+
+    fn max_entries(&self) -> usize {
+        self.max_entries
     }
 
 }

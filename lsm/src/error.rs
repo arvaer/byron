@@ -11,6 +11,9 @@ pub enum LsmError {
     #[error("Key not found")]
     KeyNotFound,
 
+    #[error("Synchronisation issue")]
+    LockPoisoned,
+
     #[error("Other error: {0}")]
     Other(String),
 }

@@ -1,3 +1,4 @@
+use crate::skiplist::CrossBeam;
 use crate::{MemTable, DataStructure};
 use crate::VectorMemTable;
 
@@ -34,7 +35,7 @@ impl MemTableBuilder {
     pub fn build(self) -> MemTable {
         let inner = match self.memtable_type {
             MemTableType::Vector => DataStructure::Vector(VectorMemTable::new(self.max_entries)),
-            MemTableType::SkipList => unimplemented!("skiplist not implemented yet"),
+            MemTableType::SkipList => DataStructure::SkipList(CrossBeam::new(self.max_entries)),
             MemTableType::ConcurrentHashmap => {
                 unimplemented!("Concurrent Hashmap not impemented yet")
             }

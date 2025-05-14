@@ -4,6 +4,7 @@ use sstable::{streamed_builder::StreamedSSTableBuilder, SSTable};
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::sync::Arc;
+use tokio::task;
 use uuid::Uuid;
 
 use crate::{
@@ -70,174 +71,274 @@ impl LsmDatabase {
             .collect()
     }
 
-    fn extend(&mut self, from: usize) -> Result<(), LsmError> {
-        log::info!("Extending from level {}", from);
-        if self.levels.is_empty() {
-            return Err(LsmError::Other("Cannot extend empty database".to_string()));
-        }
-
-        let reference_level_idx = self.levels.len() - 1;
-
-        let lrl = &self.levels[reference_level_idx];
-        let new_width = (lrl.width as f64 * self.capacity_expansion_factor) as usize;
-
-        let new_level = Level {
-            inner: Vec::new(),
-            depth: from + 1,
-            width: new_width,
-            total_entries: 0,
-        };
-
-        self.levels.push(new_level);
-        Ok(())
-    }
-
-    pub fn insert_new_table(
-        &mut self,
-        incoming_table: Arc<SSTable>,
-        level_number: usize,
+    pub async fn insert_new_table(
+        &self,
+        mut incoming_table: Arc<SSTable>,
+        mut level_number: usize,
     ) -> Result<(), LsmError> {
-        log::info!(
-            "Step 1: Inserting table with {} entries into level {}",
-            incoming_table.actual_item_count,
-            level_number
-        );
-
-        let mut final_level_flag = false;
-        if level_number >= self.levels.len() {
-            log::info!(
-                "Step 2: Level {} does not exist. Extending database...",
-                level_number
+        // Use a loop instead of recursion for moving tables up levels
+        loop {
+            println!(
+                "Step 1: Inserting table with {} entries into level {}",
+                incoming_table.actual_item_count, level_number
             );
-            final_level_flag = true;
-            self.extend(level_number)?;
 
-            log::info!("Step 2.1: New level layout:");
-            for (i, level) in self.levels.iter().enumerate() {
-                log::info!(
-                    "  Level {}: {} tables, width {}, depth {}",
-                    i,
+            // Step 1: Check if we need to extend levels
+            let mut final_level_flag = false;
+            {
+                let levels = self.levels.read().await;
+                if level_number >= levels.len() {
+                    drop(levels); // Release read lock before getting write lock
+                    println!(
+                        "Step 2: Level {} does not exist. Extending database...",
+                        level_number
+                    );
+                    final_level_flag = true;
+                    self.extend(level_number).await?;
+
+                    println!("Step 2.1: New level layout:");
+                    let levels = self.levels.read().await;
+                    for (i, level) in levels.iter().enumerate() {
+                        println!(
+                            "  Level {}: {} tables, width {}, depth {}",
+                            i,
+                            level.inner.len(),
+                            level.width,
+                            level.depth
+                        );
+                    }
+                }
+            }
+
+            // Step 2: Add table to the level
+            println!("Step 3: Adding table to level {}", level_number);
+            {
+                let mut levels = self.levels.write().await;
+                let level = &mut levels[level_number];
+                level.inner.push(incoming_table.clone());
+                level.total_entries += incoming_table.actual_item_count;
+                println!(
+                    "Step 3.1: Level {} now has {} tables with {} total entries",
+                    level_number,
                     level.inner.len(),
-                    level.width,
-                    level.depth
+                    level.total_entries
                 );
             }
-        }
 
-        log::info!("Step 3: Adding table to level {}", level_number);
-        {
-            let level = &mut self.levels[level_number];
-            level.inner.push(incoming_table.clone());
-            level.total_entries += incoming_table.actual_item_count;
-            log::info!(
-                "Step 3.1: Level {} now has {} tables with {} total entries",
-                level_number,
-                level.inner.len(),
-                level.total_entries
-            );
-        }
+            // Step 3: Check if compaction is needed
+            let needs_compaction = {
+                let levels = self.levels.read().await;
+                let level = &levels[level_number];
 
-        let needs_compaction = {
-            let level = &self.levels[level_number];
-            let will_compact = level.inner.len() >= level.width;
-            log::info!("Step 4: Checking compaction for level {}: {} tables (width {}), compaction needed: {}",
-                 level_number, level.inner.len(), level.width, will_compact);
-            will_compact
-        };
+                // Prioritize compaction at level 0 by using a lower threshold if necessary
+                // Level 0 compaction is more critical to prevent bottlenecks
+                let is_level_0 = level_number == 0;
+                let threshold = if is_level_0 {
+                    // If we're at level 0, be more aggressive with compaction
+                    // Use either the defined width or a dynamic threshold based on total tables
+                    std::cmp::min(level.width, 4) // Max 4 tables in level 0 to keep queries fast
+                } else {
+                    level.width
+                };
 
-        if needs_compaction {
-            log::info!("Step 5: Starting compaction for level {}", level_number);
+                let will_compact = level.inner.len() >= threshold;
+                println!("Step 4: Checking compaction for level {}: {} tables (threshold {}), compaction needed: {}",
+                 level_number, level.inner.len(), threshold, will_compact);
+                will_compact
+            };
+
+            // If no compaction needed, we're done
+            if !needs_compaction {
+                println!(
+                    "No compaction needed for level {}, we're done",
+                    level_number
+                );
+                return Ok(());
+            }
+
+            // Step 4: Perform compaction if needed
+            println!("Step 5: Starting compaction for level {}", level_number);
+
+            // Gather all necessary data before spawning the blocking task
             let file_name = self
                 .parent_directory
                 .join(format!("sstable-id-{}", Uuid::new_v4()));
-            let level_counts: Vec<usize> =
-                self.levels.iter().map(|lvl| lvl.total_entries).collect();
+            let level_counts: Vec<usize>;
+            let tables_to_compact: Vec<Arc<SSTable>>;
+            let total_entries;
+
+            // Get all data while holding the read lock
+            {
+                let levels = self.levels.read().await;
+                level_counts = levels.iter().map(|lvl| lvl.total_entries).collect();
+                tables_to_compact = levels[level_number].inner.clone();
+                total_entries = levels[level_number].total_entries;
+            }
+
+            // Calculate bloom filter parameters
             let bits_per_entry =
                 LsmDatabase::allocate_bloom_bits(&level_counts, TOTAL_BLOOM_BUDGET);
-            let fprs: Vec<f64> = bits_per_entry.iter().map(|&b| 2f64.powf(-b)).collect();
+            let fprs: Vec<f64> = bits_per_entry
+                .iter()
+                .map(|&b| {
+                    // Fix for "Invalid false positive rate: 1" error
+                    // Clamp between 0.001 and 0.999
+                    f64::max(0.001, f64::min(2f64.powf(-b), 0.999))
+                })
+                .collect();
 
-            // If Monkey they
-            let fpr = fprs[level_number];
-            //let fpr = self.levels[level_number].width as f64 * self.base_fpr;
-            let total_entries = self.levels[level_number].total_entries;
-            log::info!(
+            let fpr = fprs.get(level_number).cloned().unwrap_or(self.base_fpr);
+            println!(
                 "Step 5.1: Creating new table with fpr {} and {} entries",
-                fpr,
-                total_entries
+                fpr, total_entries
             );
 
             let features = SSTableFeatures {
                 fpr,
                 item_count: total_entries,
             };
-            let mut min_heap = BinaryHeap::new();
-            let mut iterators: Vec<_> = self.levels[level_number]
-                .inner
-                .iter()
-                .map(|table| table.iter())
-                .collect();
 
-            for (sstable_idx, iter) in iterators.iter_mut().enumerate() {
-                if let Some(kv_result) = iter.next() {
-                    let key_value = kv_result?;
-                    min_heap.push(HeapItem {
+            // Use task::spawn_blocking for CPU-intensive compaction
+            let compacted_table =
+                task::spawn_blocking(move || -> Result<Arc<SSTable>, LsmError> {
+                    println!("Inside compaction task for level {}", level_number);
+
+                    // Create iterators for all tables
+                    let mut iterators: Vec<_> =
+                        tables_to_compact.iter().map(|table| table.iter()).collect();
+
+                    // Initialize min heap
+                    let mut min_heap = BinaryHeap::new();
+                    for (sstable_idx, iter) in iterators.iter_mut().enumerate() {
+                        if let Some(kv_result) = iter.next() {
+                            let key_value = match kv_result {
+                                Ok(kv) => kv,
+                                Err(e) => return Err(LsmError::SSTable(e)),
+                            };
+                            min_heap.push(HeapItem {
+                                key_value,
+                                sstable_idx,
+                            });
+                        }
+                    }
+                    println!(
+                        "Step 5.2: Initialized min heap with {} items",
+                        min_heap.len()
+                    );
+
+                    // Create streamed builder
+                    let mut new_table = match StreamedSSTableBuilder::new(
+                        features,
+                        !final_level_flag,
+                        &file_name,
+                    ) {
+                        Ok(builder) => builder,
+                        Err(e) => return Err(LsmError::SSTable(e)),
+                    };
+
+                    // Merge sort from heap
+                    let mut items_processed = 0;
+                    while let Some(HeapItem {
                         key_value,
                         sstable_idx,
-                    });
-                }
-            }
-            log::info!(
-                "Step 5.2: Initialized min heap with {} items",
-                min_heap.len()
-            );
-
-            let mut new_table =
-                StreamedSSTableBuilder::new(features, !final_level_flag, &file_name)?;
-            let mut items_processed = 0;
-            while let Some(HeapItem {
-                key_value,
-                sstable_idx,
-            }) = min_heap.pop()
-            {
-                let _ = new_table.add_from_kv(key_value);
-                items_processed += 1;
-                if let Some(next_kv_result) = iterators[sstable_idx].next() {
-                    let next_kv = next_kv_result?;
-                    if next_kv.value == "d34db33f" {
-                        // deletion sentinel value
-                        continue;
+                    }) = min_heap.pop()
+                    {
+                        let _ = new_table.add_from_kv(key_value);
+                        items_processed += 1;
+                        if let Some(next_kv_result) = iterators[sstable_idx].next() {
+                            let next_kv = match next_kv_result {
+                                Ok(kv) => kv,
+                                Err(e) => return Err(LsmError::SSTable(e)),
+                            };
+                            if next_kv.value == "d34db33f" {
+                                // deletion sentinel value
+                                continue;
+                            }
+                            min_heap.push(HeapItem {
+                                key_value: next_kv,
+                                sstable_idx,
+                            });
+                        }
                     }
-                    min_heap.push(HeapItem {
-                        key_value: next_kv,
-                        sstable_idx,
-                    });
-                }
-            }
-            log::info!(
-                "Step 5.3: Processed {} items during compaction",
-                items_processed
-            );
+                    println!(
+                        "Step 5.3: Processed {} items during compaction",
+                        items_processed
+                    );
 
-            let compacted_table = new_table.finalize()?;
-            log::info!(
+                    // Finalize the new table
+                    match new_table.finalize() {
+                        Ok(table) => {
+                            println!("Finalizing compacted SSTable");
+                            println!("Finalized compacted SSTable");
+                            Ok(table)
+                        }
+                        Err(e) => Err(LsmError::SSTable(e)),
+                    }
+                })
+                .await.unwrap()?;
+
+            println!(
                 "Step 5.4: Finalized new table with {} entries",
                 compacted_table.actual_item_count
             );
 
-            for table in self.levels[level_number].inner.iter() {
-                table.delete()?;
+            // Clear the current level
+            {
+                let mut levels = self.levels.write().await;
+                // Delete the old tables from disk
+                for table in &levels[level_number].inner {
+                    if let Err(e) = table.delete() {
+                        eprintln!("Warning: Failed to delete table: {:?}", e);
+                    }
+                }
+                levels[level_number].inner.clear();
+                levels[level_number].total_entries = 0;
+                println!("Step 5.5: Cleared level {}", level_number);
             }
-            self.levels[level_number].inner.clear();
-            log::info!("Step 5.5: Cleared level {}", level_number);
 
-            log::info!(
-                "Step 5.6: Recursively inserting compacted table into level {}",
-                level_number + 1
-            );
-            self.insert_new_table(compacted_table, level_number + 1)?;
+            // Instead of recursion, update the loop variables and continue
+            println!("Step 5.6: Moving to next level: {}", level_number + 1);
+            incoming_table = compacted_table;
+            level_number += 1;
+
+            // The loop will now iterate with the new table at the new level
+        }
+    }
+
+    // Also update the extend method to be async
+    pub async fn extend(&self, target_level: usize) -> Result<(), LsmError> {
+        println!(
+            "Extending levels from {} to {}",
+            self.levels.read().await.len(),
+            target_level + 1
+        );
+
+        let mut levels = self.levels.write().await;
+        if levels.is_empty() {
+            return Err(LsmError::Other("Cannot extend empty database".to_string()));
         }
 
-        log::info!("Step 6: Insertion complete for level {}", level_number);
+        let reference_level_idx = levels.len() - 1;
+        let lrl = &levels[reference_level_idx];
+        let new_width = (lrl.width as f64 * self.capacity_expansion_factor) as usize;
+
+        while levels.len() <= target_level {
+            let new_level = Level {
+                inner: Vec::new(),
+                depth: levels.len(),
+                width: new_width,
+                total_entries: 0,
+            };
+
+            println!(
+                "Adding new level with width {} and depth {}",
+                new_width,
+                levels.len()
+            );
+            levels.push(new_level);
+        }
+
+        println!("Extended levels, now have {} levels", levels.len());
         Ok(())
     }
 }
