@@ -81,7 +81,6 @@ impl MemTableOperations for CrossBeam {
     ) -> Result<Arc<SSTable>, crate::error::MemTableError> {
         let mut builder = StreamedSSTableBuilder::new(table_params, true, &path)?;
 
-        // Iterate in sorted order
         for entry in self.inner.iter() {
             let kv = KeyValue {
                 key: entry.key().clone(),

@@ -20,6 +20,7 @@ pub struct Level {
     pub total_entries: usize,
 }
 
+#[derive(Debug)]
 pub struct LsmDatabase {
     // Vector of memtables, newest first (at index 0)
     pub memtables: Arc<Mutex<Vec<(Uuid, Arc<MemTable>)>>>,
@@ -103,31 +104,20 @@ impl LsmDatabase {
     }
 
     pub async fn put(&self, key: String, value: String) -> Result<(), LsmError> {
-        // Get lock on memtables
         let mut memtables = self.memtables.lock().await;
-
-        // Get active memtable (at index 0)
         let (active_id, active_memtable) = &memtables[0];
 
-        // Insert into active memtable
         active_memtable.insert(key, value);
 
-        // Log memtable status occasionally
-        let current_count = active_memtable.current_length();
-
-        // Check if memtable is full
         if active_memtable.at_capacity() {
 
             let full_table = active_memtable.clone();
             let full_id = *active_id;
 
-            // Create new memtable and add to front of list
             let new_id = Uuid::new_v4();
             let new_table = Arc::new(MemTableBuilder::default().max_entries(1000).build());
 
-            // Update memtables list by inserting new one at the front
             memtables.insert(0, (new_id, new_table));
-
             drop(memtables);
 
             let memtables_ref = Arc::clone(&self.memtables);
@@ -153,7 +143,6 @@ impl LsmDatabase {
             }
 
             if let Ok(mut memtables) = memtables_ref.try_lock() {
-                let original_len = memtables.len();
                 memtables.retain(|(id, _)| id != &full_id);
 
             } else {
@@ -177,7 +166,6 @@ impl LsmDatabase {
         let mut found_first_key = false;
         let mut start_key = from_m.clone();
 
-        // Check all memtables (newest to oldest)
         let memtables = &self.memtables.lock().await;
 
         for (_, memtable) in memtables.iter() {

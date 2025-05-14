@@ -408,7 +408,7 @@ impl SSTable {
         &self,
         block_data: Arc<[u8]>,
         key: String,
-        restart_points: &[usize],
+        _restart_points: &[usize],
     ) -> Result<KeyValue, SSTableError> {
         // Try linear scan first for debugging
         log::info!("DEBUG: defaulting to linear scan for now");

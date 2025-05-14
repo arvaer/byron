@@ -34,7 +34,7 @@ impl PartialOrd for HeapItem {
         Some(self.cmp(other))
     }
 }
-const TOTAL_BLOOM_BUDGET: usize = 1_000_000;
+const TOTAL_BLOOM_BUDGET: usize = 10 * 10_000_000;
 
 impl LsmDatabase {
     /// this implements the monkey‐paper solution:
@@ -43,30 +43,31 @@ impl LsmDatabase {
     ///
     /// The closed‐form is:
     ///   b_i = (M/N) + (∑ n_j·log2(n_j))/N  − log2(n_i)
-    pub fn allocate_bloom_bits(level_counts: &[usize], total_bits: usize) -> Vec<f64> {
-        // 1. Convert to f64 and sum total entries N
+    pub fn allocate_bloom_fprs(level_counts: &[usize], total_bits: usize) -> Vec<f64> {
         let n: Vec<f64> = level_counts.iter().map(|&c| c as f64).collect();
         let n_sum: f64 = n.iter().sum();
         assert!(n_sum > 0.0, "Must have at least one entry across levels");
 
-        // 2. compute ∑ n_j·log2(n_j)
+        // ∑ n_j · log₂(n_j)
         let sum_n_log: f64 = n.iter().map(|&ni| ni * ni.log2()).sum();
 
-        let m_over_n_sum = (total_bits as f64) / n_sum;
+        let m_over_n = (total_bits as f64) / n_sum;
         let avg_log = sum_n_log / n_sum;
 
-        // 4. compute b_i = (m/n) + avg_log − log2(n_i)
-        n.iter()
-            .map(|&ni| {
-                // if ni is zero, treat log2(ni) → 0 and clamp
-                if ni <= 1.0 {
-                    // With 0 or 1 entry, best you can do is allocate at least 1 bit
-                    f64::max(m_over_n_sum + avg_log, 1.0)
+        n.into_iter()
+            .map(|ni| {
+                // b_i = (m / N) + avg_log − log2(n_i)  (clamp to ≥ 0)
+                let raw_b = if ni <= 1.0 {
+                    // with n_i = 0 or 1, we still give at least minimal bits
+                    m_over_n + avg_log
                 } else {
-                    let bi = m_over_n_sum + avg_log - ni.log2();
-                    // bits-per-entry must be non-negative
-                    f64::max(bi, 0.0)
+                    m_over_n + avg_log - ni.log2()
                 }
+                .max(0.0);
+
+                // fpr_i = 2^(−b_i), but clamp so we never ask for an invalid rate
+                let fpr = 2f64.powf(-raw_b);
+                fpr.max(0.001).min(0.999)
             })
             .collect()
     }
@@ -176,17 +177,9 @@ impl LsmDatabase {
             }
 
             // Calculate bloom filter parameters
-            let bits_per_entry =
-                LsmDatabase::allocate_bloom_bits(&level_counts, TOTAL_BLOOM_BUDGET);
-            let fprs: Vec<f64> = bits_per_entry
-                .iter()
-                .map(|&b| {
-                    // Fix for "Invalid false positive rate: 1" error
-                    // Clamp between 0.001 and 0.999
-                    f64::max(0.001, f64::min(2f64.powf(-b), 0.999))
-                })
-                .collect();
-
+            let total_entries: usize = level_counts.iter().sum();
+            let fprs = LsmDatabase::allocate_bloom_fprs(&level_counts, total_entries*10);
+            println!("fprs: {:?}", fprs);
             let fpr = fprs.get(level_number).cloned().unwrap_or(self.base_fpr);
             println!(
                 "Step 5.1: Creating new table with fpr {} and {} entries",
@@ -275,7 +268,8 @@ impl LsmDatabase {
                         Err(e) => Err(LsmError::SSTable(e)),
                     }
                 })
-                .await.unwrap()?;
+                .await
+                .unwrap()?;
 
             println!(
                 "Step 5.4: Finalized new table with {} entries",

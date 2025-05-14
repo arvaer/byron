@@ -18,7 +18,7 @@ pub struct WorkloadStats {
     pub unknown_commands: usize,
 }
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
+#[tokio::main(flavor = "multi_thread", worker_threads = 20)]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let parent_directory = "./data".to_string();
     let byron = Arc::new(LsmDatabase::new(parent_directory, None));
@@ -30,7 +30,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut stats = WorkloadStats::default();
 
     while let Some(line) = lines.next_line().await? {
-        println!("{}", count);
         let parts: Vec<&str> = line.split_whitespace().collect();
         if parts.is_empty() {
             continue;

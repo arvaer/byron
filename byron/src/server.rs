@@ -33,12 +33,13 @@ impl Byron for ByronServerContext {
     #[tracing::instrument]
     async fn get(&self, request: Request<GetRequest>) -> Result<Response<GetResponse>, Status> {
         tracing::debug!("Received get request: {:?}", request);
+        println!("In here");
         let input = request.get_ref();
         let key = input.key.to_string();
 
         let db = self.database.read().await;
         let kv = db
-            .get(key)
+            .get(key).await
             .map_err(|e| Status::internal(format!("Database error: {:?}", e)))?;
 
         let value: i64 = kv
@@ -61,7 +62,7 @@ impl Byron for ByronServerContext {
         let key = input.key.to_string();
         let value = input.value.to_string();
         let mut db = self.database.write().await;
-        let _ = db.put(key, value);
+        let _ = db.put(key, value).await;
         drop(db);
 
         let response = PutResponse {};
@@ -81,7 +82,7 @@ impl Byron for ByronServerContext {
 
         let db = self.database.read().await;
         let values = db
-            .range(start, end)
+            .range(start, end).await
             .map_err(|e| Status::internal(format!("Database Error: {:?}", e)))?
             .iter()
             .map(|item| byron::KeyValue {
@@ -116,7 +117,7 @@ impl Byron for ByronServerContext {
 
         let mut db = self.database.write().await;
         let _ = db
-            .delete(key)
+            .delete(key).await
             .map_err(|e| Status::internal(format!("Database error: {:?}", e)))?;
         drop(db);
 
