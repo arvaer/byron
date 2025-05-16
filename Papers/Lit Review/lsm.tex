@@ -1,0 +1,216 @@
+% !TeX root = lsm.tex
+
+\documentclass[sigconf]{acmart}
+
+% % % % % % % % % % % % % % % % %
+% Metadata – fill these in
+% % % % % % % % % % % % % % % % %
+\title{Heterogeneous computing in Log-Structured Merge Trees}
+\author{Michael Almeida}
+\affiliation{
+  \institution{Harvard University}
+  \city{Cambridge} \state{Massachusets} \country{USA}
+}
+\email{mia330@g.harvard.edu}
+
+
+% \begin{CCSXML}
+% <ccs2012>
+%  <concept>
+%   <concept_id>10010520.10010553.10010562</concept_id>
+%   <concept_desc>Computer systems organization~Parallel architectures</concept_desc>
+%   <concept_significance>500</concept_significance>
+%  </concept>
+% </ccs2012>
+% \end{CCSXML}
+% \ccsdesc[500]{Computer systems organization~Parallel architectures}
+
+% \keywords{ACM \LaTeX\ template; sample document; your keywords}
+
+% % % % % % % % % % % % % % % % %
+% Packages
+% % % % % % % % % % % % % % % % %
+\usepackage{graphicx}   % for \includegraphics
+\usepackage{booktabs}   % for \toprule, \midrule, \bottomrule in tables
+\usepackage{subcaption} % sub-figures
+\usepackage{amsmath}  % math
+\usepackage{bookmark}
+\usepackage{hyperref}    % clickable references
+\hypersetup{%
+  colorlinks=true,
+  linkcolor=blue,
+  citecolor=blue,
+  urlcolor=blue
+}
+
+
+% % % % % % % % % % % % % % % % %
+% Document begins
+% % % % % % % % % % % % % % % % %
+\begin{document}
+
+\begin{abstract}
+Log-Structured Merge Trees (LSM trees) are a popular data structure for
+key-value stores, providing efficient write and read operations.
+However, as the size of data and its complexity grows, the performance of LSM trees tends to degrade. 
+This is particularly true of the compaction process, which is typically a CPU-bottlenecked process. 
+To this end, we review the state-of-the-art in heterogeneous computing for LSM trees, focusing on GPU and FPGA-based approaches.
+We analyze the performance and architectural trade-offs of these approaches, including their parallelism models, memory and communication strategies, reconfigurability, and energy efficiency.
+We also identify gaps in the current research and propose future directions for improving the performance of LSM trees using heterogeneous computing.
+We conclude that while GPU and FPGA-based approaches show promise, with CUDA streams being of expectional potential, there is still much work to be done in terms of optimizing performance, reconfigurability, and energy efficiency.
+\end{abstract}
+
+\settopmatter{printacmref=false} 
+\maketitle
+
+\section{Introduction}
+  \subsection{Motivation}
+   Key-Value stores and, subsequently, LSM trees have become a very popular data structure for real world, write heavy workloads. These include NoSQL databases, such as LevelDB and RocksDB, which are widely used in industry.
+    Moreover, since the advent of the Cloud and cheaper SSDs, LSM trees have become even more relevant as they are able to efficiently handle large amounts of data.
+    Due to the LSM tree's design, it's both able to soak up an extremely high write throughput, while also being able to provide amoritized read performance for more recent data. 
+    A particularly elucidating case study for this is the work done by \cite{rocksdb}, which shows that RocksDB 4.5M-7M read QPS for point lookups with sustained writes. 4M-6M QPS prefix range scans with sustained writes.
+    In scenarios such as E-commerce, social media, and IoT applications, the ability to handle large amounts of data efficiently is crucial. Moreover, we see that real workloads tend to retrieve more recent data more often.
+
+    KV-Stores build on the LSM tree design typically tend to have other features, such as Bloom filters and fence pointers, which help to reduce the number of I/O operations needed to retrieve data, and research has been done to further optimize these sub structures.\cite{dayan2017monkey}
+    Despite all the effort spend on hardware software co-design for CPU based LSM trees, as the size of data and its complexity grows, the performance still tends to degrade. This is particularly true of the compaction process, which is typically a CPU-bottlenecked process. 
+    Research has also been done to optimize the compaction process, such as \cite{dayan2018dostoevsky} \cite{dayan2019log} which aim to improve the compaction policies associated with LSM trees. However, these optimizations are limited by the CPU's performance and the memory bandwidth of the system.
+    
+    That being said, desipite the enormous success of LSM trees, and the massive amount of value that has been delivered, we continue to seek ways to improve these systems and make them more efficient. To this end, we review the state-of-the-art in heterogeneous computing for LSM trees, focusing on GPU and FPGA-based approaches. We analyze the performance and architectural trade-offs of these approaches, including their parallelism models, memory and communication strategies, reconfigurability, and energy efficiency.
+
+  \subsection{Rise of Heterogeneous Hardware}
+
+  \subsubsection{Graphics Processing Units (GPUs)}
+  Modern GPUs provide massive data-parallel compute resources and very high memory bandwidth, making them attractive targets for offloading the most compute‐intensive phases of LSM-tree compaction.  
+  Their single-instruction, multiple-thread (SIMT) execution model can launch thousands of lightweight threads in parallel—each executing the same instruction on different data—perfectly matching the parallel‐merge and sort kernels that underpin compaction.
+
+  The GPU memory hierarchy further amplifies this advantage.  At the top sits global memory: the largest but slowest on-device storage, which holds the bulk of SSTable data.  
+  Beneath that, shared memory provides a small, low-latency scratchpad for intra–thread-block communication, and registers offer per-thread storage at the highest speed.  
+  GPUs also expose constant memory (read-only and cached) and texture memory (optimized for 2D spatial locality), though compaction kernels typically focus on tiling data between global, shared, and register spaces to minimize global-memory traffic.
+
+  In recent years, frameworks such as CUDA and OpenCL have made these hardware features accessible via high-level APIs.  
+  This democratization of GPU programming has driven widespread adoption in data-processing fields—from machine learning to scientific computing and, increasingly, database systems.  
+  NVIDIA’s latest architectures (e.g.\ Hopper and Blackwell) have continued to push peak memory bandwidth and reduce latency, directly benefiting workloads like LSM compaction that are sensitive to both.
+
+  Early GPU-LSM work by Ashkiani et al.\ demonstrates that a dynamic GPU-resident dictionary with batch-merge compactions on the device can sustain up to 225 M inserts/sec, and deliver 75 M/32 M/23 M QPS for lookup, count, and range operations under sustained writes \cite{ashkiani2018gpu}.  This work specifically builds a LSM backed Key-Value storage on the GPU Memory-- and does not deal with compactions; but serves to highlight the naturally paralellizable workload of typical LSM workloads.
+  Building on this, Zhou et al.\ show that integrating CUDA streams with GPUDirect Storage—thereby overlapping I/O transfers and compaction kernels—yields 2–3× end-to-end throughput improvements compared to CPU-only designs \cite{zhou2024gpuaccel}.
+
+  \subsubsection{Field-Programmable Gate Arrays (FPGAs)}
+  FPGA;s are a reconfigurable class of hardware devices composed of lookup tables (LUTs), flip-flops, on chip DRAM, and other hardware elements-- and have the added advantage that they can scale with the amount of resources they provision and not due to any software.
+  Practically, this means that FPGAs tend to ship without an operating system, and instead rely on a hardware description language (HDL) to describe the hardware that is to be implemented. Software Engineers can then use high-level synthesis (HLS) tools to compile C/C++ like code into a HDL, which is then synthesized into a bitstream that can be loaded onto the FPGA. This allows for a high degree of flexibility and reconfigurability, as the hardware can be changed on-the-fly to adapt to different workloads.
+  FPGAs tend to be deployed in situations where the algorithmic workload is highly sequential, and the data is highly structured. This is because the hardware units can be highly optimized to specific workloads, and the data can be streamed through the hardware in a highly efficient manner. 
+
+  In a typical FPGA-accelerated LSM tree workflow, SSTable data streams from SSDs over PCIe into on-card buffers implemented in on-chip RAM. 
+  Custom comparators and merge networks—crafted in HDL or then execute streaming compactions in deeply pipelined stages.  
+  Each cycle, data flows through comparator trees, prefix compressors, and write schedulers without any control-flow overhead, achieving sustained throughput far beyond what CPUs can deliver for the same workload. \cite{zhang2020fpga}
+
+  \begin{itemize}
+    \item \em Deterministic pipelines: Fixed-latency stages ensure predictable performance.  
+    \item \em Fine-grained \em parallelism: Multiple merge units can operate in parallel on independent data streams.  
+    \item \em On-chip buffering: S/BRAM holds hot key ranges and intermediate results, reducing off-chip memory traffic.  
+  \end{itemize}
+
+  In the cloud, FPGAs are deployed in a variety of configurations, and the reader is encouraged to refer to the work done by \cite{bobda2022future} for a in depth survey of successful, massively deployed FPGA systems in use at Tencent and Microsoft. 
+  Notably, the most interesting deployment strategies-- atleast with respect to accelerating LSM trees and that we see used in this survey, are the following:
+   \begin{itemize}
+    \item Bump-in-the-Wire: FPGA sits between CPU and storage (or network), filtering and merging data on the fly.  Microsoft’s Catapult v2 uses this model for network packet processing and search index merging in Azure datacenters. \cite{bobda2022future}
+    \item Co-Processor: FPGA is PCIe-attached or Ethenret attached to a host node, offloading compute-intensive tasks while the CPU handles control and metadata.  Alibaba Cloud’s F3 and AWS F1 instances follow this pattern, allowing customers to accelerate databases, genomics, and AI inference. \cite{bobda2022future}
+    \item Smart SSD / Computational Storage: Emerging SSDs integrate FPGA logic alongside NAND controllers, enabling compaction to occur inside the storage device itself (e.g.\ Samsung SmartSSD).  
+  \end{itemize}
+
+  By integrating an FPGA accelerator into the LSM pipeline, the host CPU is freed from merge stages and can focus on memtable management and query dispatch, leading to higher overall throughput and lower tail latencies in write-heavy environments.  
+
+  \subsection{Research Questions and Angle}
+    \begin{itemize}
+      \item Key questions guiding this review
+    \end{itemize}
+
+\section{Background}
+  \subsection{LSM-Tree Basics}
+    \begin{itemize}
+      \item Levels, memtable, SSTables
+      \item Compaction costs and I/O profiles
+    \end{itemize}
+  \subsection{GPU Architectures}
+    \begin{itemize}
+      \item SIMT model
+      \item Memory hierarchy (global, shared, registers)
+    \end{itemize}
+  \subsection{FPGA Basics}
+    \begin{itemize}
+      \item Reconfigurability
+      \item On-chip BRAM and DSPs
+      \item Interfaces (PCIe, Ethernet)
+    \end{itemize}
+
+\section{GPU-Based Approaches}
+  \subsection{GPU LSM (Ashkiani et al.)}
+    \begin{itemize}
+      \item Dynamic dictionary on GPU
+      \item Merge-based batch inserts and tombstones
+      \item Query kernels
+      \item Performance vs.~sorted array
+    \end{itemize}
+  \subsection{LevelDB + GPU Compaction (Zhou et al.)}
+    \begin{itemize}
+      \item Q-Compaction (upper levels) vs.~C-Compaction (lower levels)
+      \item CUDA streams and GPUDirect Storage
+      \item Throughput and mixed-workload gains
+    \end{itemize}
+
+\section{FPGA-Based Approaches}
+  \subsection{SAF (Quraishi et al.)}
+    \begin{itemize}
+      \item Ethernet shell and hot-plug discovery
+      \item Parallel partial reconfiguration
+      \item Standalone accelerator protocols
+    \end{itemize}
+  \subsection{On-Card Compaction Modules (Peng et al.)}
+    \begin{itemize}
+      \item MicroBlaze control logic
+      \item Streaming compare-merge pipeline
+      \item On-device prefix compression
+      \item Reported 11\texttimes speedup vs.~LevelDB
+    \end{itemize}
+
+\section{Comparative Analysis}
+  \subsection{Parallelism Models}
+    \begin{itemize}
+      \item Batch vs.~streaming
+      \item SIMT vs.~dataflow
+    \end{itemize}
+  \subsection{Memory and Communication}
+    \begin{itemize}
+      \item PCIe vs.~Ethernet vs.~direct NAND/HBM
+    \end{itemize}
+  \subsection{Reconfigurability and Flexibility}
+    \begin{itemize}
+      \item Runtime switching, hot-plug
+      \item Programming models (CUDA/OpenCL vs.~HLS/RTL)
+    \end{itemize}
+  \subsection{Energy and Cost}
+    \begin{itemize}
+      \item Power efficiency
+      \item Hardware cost comparisons
+    \end{itemize}
+
+\section{Gaps and Future Directions}
+  \begin{itemize}
+    \item Bandwidth-efficient GPU designs (HBM, multi-channel)
+    \item Low-latency workload switching on FPGA (partial PR)
+    \item Unified programming models (CUDA/OpenCL vs.~HLS vs.~RTL)
+    \item Near-data processing in storage devices
+  \end{itemize}
+
+\section{Conclusion}
+  \begin{itemize}
+    \item Summary of current state-of-the-art
+    \item Proposed next steps and open questions
+  \end{itemize}
+
+\bibliographystyle{ACM-Reference-Format}
+\nocite{*}
+\bibliography{refs}
+
+
+
+\end{document}
